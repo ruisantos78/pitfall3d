@@ -41,6 +41,9 @@ export class Player {
     this.deathTimer = 0;
     this.tripCooldown = 0;
     this.isTripped = false; // Caiu de cara no chão e aguarda uma nova direção
+    // Queda do céu no respawn (como no original): nasce lá no alto e despenca.
+    this.RESPAWN_DROP_HEIGHT = 12;
+    this.respawnDrop = false;
     // O topo do chão é Y=0. A câmera e os braços precisam permanecer acima dele.
     this.PRONE_EYE_HEIGHT = 0.65;
     this.TRIP_STAND_DELAY = 0.25;
@@ -202,10 +205,11 @@ export class Player {
       }
     }
 
-    // Check if standing on disappearing quicksand opening beneath feet
+    // Check if standing on a disappearing quicksand section opened beneath feet
+    // (zipper: cada seção abre/fecha por conta própria — só a seção sob os pés mata)
     if (this.isGrounded && this.y <= 0.1 && world.activeOpeningPits) {
       for (const pitData of world.activeOpeningPits) {
-        if (pitData.isOpen && Math.abs(this.z - pitData.z) < pitData.radius) {
+        if (world.isQuicksandOpenAt(pitData, this.z)) {
           audio.playSink();
           this.die('A areia movediça se abriu sob seus pés!');
           return;
@@ -285,6 +289,11 @@ export class Player {
         this.y = standingSurfaceY;
         this.vy = 0;
         this.isGrounded = true;
+        // Aterrissou da queda do céu do respawn: baque seco de impacto.
+        if (this.respawnDrop) {
+          this.respawnDrop = false;
+          audio.playGroundThud();
+        }
       } else {
         // Fell into pit / water / quicksand!
         if (this.y < -1.2) {
@@ -347,15 +356,15 @@ export class Player {
       }
     }
 
-    // Check disappearing quicksand pits (opening & closing holes)
+    // Check disappearing quicksand pits (zipper holes: cada seção é solo ou abismo)
     if (world.activeOpeningPits) {
       for (const pitData of world.activeOpeningPits) {
         if (Math.abs(z - pitData.z) < pitData.radius) {
-          if (pitData.isOpen) {
-            // Pit is currently open!
+          if (world.isQuicksandOpenAt(pitData, z)) {
+            // A seção sob os pés está aberta!
             return -10;
           } else {
-            // Pit is closed! Solid ground, safe to run across!
+            // Seção fechada! Solo sólido, dá para correr (ou surfar o zíper)!
             return 0.0;
           }
         }
@@ -618,10 +627,9 @@ export class Player {
 
   respawn(world = null) {
     this.isDying = false;
-    this.y = 0;
     this.vy = 0;
     this.vz = 0;
-    this.isGrounded = true;
+    this.isGrounded = false;
     this.isTripped = false;
     this.tripStandTimer = 0;
     this.tripCooldown = 0;
@@ -635,7 +643,10 @@ export class Player {
       // Fallback: recua 8 unidades
       this.z += 8;
     }
-    this.camera.position.set(0, EYE_HEIGHT, this.z);
+    // Cai do céu como no original: nasce lá no alto e a gravidade faz o resto.
+    this.y = this.RESPAWN_DROP_HEIGHT;
+    this.respawnDrop = true;
+    this.camera.position.set(0, this.y + EYE_HEIGHT, this.z);
   }
 
   triggerGameOver(reason) {
@@ -669,6 +680,7 @@ export class Player {
     this.tripCooldown = 0;
     this.isTripped = false;
     this.tripStandTimer = 0;
+    this.respawnDrop = false;
 
     const prompt = document.getElementById('vine-prompt');
     if (prompt) prompt.classList.remove('active');

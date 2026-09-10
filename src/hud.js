@@ -139,7 +139,17 @@ export class HUD {
         }
 
         if (nearestPit && minPitDist < 14) {
-          if (nearestPit.isOpen) {
+          if (nearestPit.phase === 'closing') {
+            this.crocPromptEl.className = 'hud-box croc-status safe';
+            if (this.crocTextEl) {
+              this.crocTextEl.textContent = '🤐 ZÍPER FECHANDO: AVANCE COM A ONDA!';
+            }
+          } else if (nearestPit.phase === 'opening') {
+            this.crocPromptEl.className = 'hud-box croc-status danger';
+            if (this.crocTextEl) {
+              this.crocTextEl.textContent = '⚠️ AREIA ABRINDO EM ONDA! AGUARDE FECHAR!';
+            }
+          } else if (nearestPit.isOpen) {
             this.crocPromptEl.className = 'hud-box croc-status danger';
             if (this.crocTextEl) {
               this.crocTextEl.textContent = '⚠️ AREIA MOVEDIÇA ABERTA! LONGA DEMAIS PARA PULAR - AGUARDE!';

@@ -109,12 +109,12 @@ pitfall/
 - **Atualizações Dinâmicas (`world.update(delta)`):**
   - Animação do balanço do cipó (`v.vine.pivot.rotation.x`).
   - Ciclo de 4.4s da boca dos jacarés (fechada, alerta com olhos laranjas, aberta vermelha, estalo ao fechar).
-  - Ciclo de 5.4s da areia movediça (fechada e sólida por 2.8s, tremor, abertura por 1.8s, fechamento).
+  - Ciclo zíper de 7.4s da areia movediça (fechada e sólida por 2.8s, abertura em onda entrada→saída por 1.8s, totalmente aberta por 1.6s, fecho em zíper entrada→saída por 1.2s surfável).
 
 #### [`src/models.js`](file:///home/ruisantos/Projects/pitfall/src/models.js)
-- `createOpeningQuicksandModel(voxelSize = 0.45)`:
-  - Fundo de lama borbulhante em `Y = -2` de `Z = -10` a `+10` (9.0 metros).
-  - Tampão de solo móvel (`plug`) com fissuras e textura de terra idêntica ao caminho.
+- `createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 6)`:
+  - Paredes fixas do poço em `Y = -2..0`; fundo é o poço negro sem fim (`addBottomlessShaft`).
+  - Tampão segmentado em 6 seções ao longo de `Z`: cada seção parte-se ao meio (metades deslizam do centro para as laterais em `X`) e afunda em `Y` conforme `openAmount` 0→1, com tremor durante o movimento. A física (`isQuicksandOpenAt`) e o ciclo são por seção.
 - `createCrocodileModel(voxelSize = 0.32)`:
   - Cabeça/olhos em `Z = 0`.
   - Plataforma segura nas escamas e chevrons dourados de `Z = -10` a `+2` (`z <= croc.z + 0.8`).

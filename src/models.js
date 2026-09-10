@@ -763,9 +763,12 @@ export function createPlayerArmsModel() {
 
 /**
  * Creates the iconic Atari Pitfall Disappearing Quicksand Hole (Areia Movediça que Abre e Fecha)
- * Consists of a deep mud pit and a sinking/rising ground plug that opens and closes periodically.
+ * ZIPPER EDITION: o tampão é dividido em NUM_SEGMENTS seções ao longo de Z que se
+ * partem ao meio (metades deslizam do centro para as laterais em X) e afundam em Y,
+ * abrindo em onda da entrada (+Z, lado do herói) até a saída (-Z) e fechando na
+ * mesma ordem — como um zíper — para permitir atravessar surfando a onda de fecho.
  */
-export function createOpeningQuicksandModel(voxelSize = 0.45) {
+export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 6) {
   const group = new THREE.Group();
 
   // 1. Fixed Pit: paredes do poço (do chão para baixo).
@@ -789,29 +792,61 @@ export function createOpeningQuicksandModel(voxelSize = 0.45) {
   const pitMesh = new THREE.Mesh(pitGeo, SHARED_MATERIAL);
   group.add(pitMesh);
 
-  // 2. Sinking Ground Plug (O solo móvel que abre e fecha!)
-  const plugGroup = new THREE.Group();
-  const plugVoxels = [];
+  // 2. Tampão segmentado: cada seção tem metade esquerda (x<0) e direita (x>=0)
+  // que se afastam em X e afundam em Y conforme `openAmount` vai de 0 a 1.
+  // Geometrias com center=false (coordenadas absolutas) + offset base de -vs/2
+  // para centralizar o tampão na origem do grupo.
+  const baseOffset = -voxelSize / 2;
+  const Z_MIN = -9;
+  const Z_MAX = 9;
+  const totalRows = Z_MAX - Z_MIN + 1;
+  const segments = [];
 
-  // Dirt trail surface matching the corridor path (Z = -9 to 9)
-  for (let z = -9; z <= 9; z++) {
-    for (let x = -3; x <= 3; x++) {
-      const isCenter = Math.abs(x) <= 2 && Math.abs(z) <= 6;
-      let col = '#9a7638';
-      if (isCenter) {
-        col = (x + z) % 2 === 0 ? '#7a5a22' : '#8c6828'; // Darker muddy fissure area
-      } else if (Math.abs(z) % 3 === 0 || (x + z) % 4 === 0) {
-        col = '#b08c48'; // Crack ring fissures
+  for (let s = 0; s < numSegments; s++) {
+    // Seção s=0 na ENTRADA (+Z, lado do herói) até s=numSegments-1 na SAÍDA (-Z).
+    const zHi = Z_MAX - Math.floor((s * totalRows) / numSegments);
+    const zLo = Z_MAX - Math.floor(((s + 1) * totalRows) / numSegments) + 1;
+    const leftVoxels = [];
+    const rightVoxels = [];
+
+    // Dirt trail surface matching the corridor path
+    for (let z = zLo; z <= zHi; z++) {
+      for (let x = -3; x <= 3; x++) {
+        const isCenter = Math.abs(x) <= 2 && Math.abs(z) <= 6;
+        let col = '#9a7638';
+        if (isCenter) {
+          col = (x + z) % 2 === 0 ? '#7a5a22' : '#8c6828'; // Darker muddy fissure area
+        } else if (Math.abs(z) % 3 === 0 || (x + z) % 4 === 0) {
+          col = '#b08c48'; // Crack ring fissures
+        }
+        const top = { x, y: 0, z, color: col };
+        const under = { x, y: -1, z, color: '#543614' }; // Dirt under-plug
+        if (x < 0) {
+          leftVoxels.push(top, under);
+        } else {
+          rightVoxels.push(top, under);
+        }
       }
-      plugVoxels.push({ x, y: 0, z, color: col });
-      plugVoxels.push({ x, y: -1, z, color: '#543614' }); // Dirt under-plug
     }
-  }
 
-  const plugGeo = createVoxelGeometry(plugVoxels, voxelSize, true);
-  const plugMesh = new THREE.Mesh(plugGeo, SHARED_MATERIAL);
-  plugGroup.add(plugMesh);
-  group.add(plugGroup);
+    const leftMesh = new THREE.Mesh(createVoxelGeometry(leftVoxels, voxelSize, false), SHARED_MATERIAL);
+    const rightMesh = new THREE.Mesh(createVoxelGeometry(rightVoxels, voxelSize, false), SHARED_MATERIAL);
+    leftMesh.position.set(baseOffset, 0, baseOffset);
+    rightMesh.position.set(baseOffset, 0, baseOffset);
+    group.add(leftMesh);
+    group.add(rightMesh);
+
+    segments.push({
+      leftMesh,
+      rightMesh,
+      baseOffset,
+      // Limites da seção em metros relativos ao centro do poço (para a física):
+      minOffset: (zLo - 0.5) * voxelSize,
+      maxOffset: (zHi + 0.5) * voxelSize,
+      openAmount: 0,
+      isOpen: false,
+    });
+  }
 
   // Edge warning gravel on path rim (Z = -10 and +10)
   const rimVoxels = [];
@@ -828,10 +863,16 @@ export function createOpeningQuicksandModel(voxelSize = 0.45) {
     group.add(rimMesh);
   }
 
+  // Grupo fantasma para compatibilidade com o antigo tampão único.
+  const plug = new THREE.Group();
+  group.add(plug);
+
   return {
     group,
-    plug: plugGroup,
+    plug,
+    segments,
     voxelSize,
+    numSegments,
     radiusZ: 10 * voxelSize, // 4.5m radius = 9.0m total length
     isOpen: false,
     timer: 0,

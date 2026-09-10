@@ -452,16 +452,43 @@ export class World {
       type: 'disappearing_quicksand',
       screenIndex,
       pit: pit,
+      segments: pit.segments,
+      numSegments: pit.segments.length,
       z: z,
       radius: 4.5, // 9.0 meters total length - cannot be cleared with a single jump!
       timer: Math.random() * 2.0,
       isOpen: false,
+      openCount: 0,
+      phase: 'closed', // closed | opening | open | closing (zipper)
       wasOpen: false,
       rumblePlayed: false,
+      // Zipper timing (seconds). Abertura em onda entrada->saída, pausa aberta,
+      // fecho em zíper entrada->saída para surfar a onda (~7.5 m/s vs 9.0 do Harry).
+      closedDur: 2.8,
+      openingDur: 1.8,
+      openDur: 1.6,
+      closingDur: 1.2,
     };
 
     this.activeOpeningPits.push(pitData);
     this.activeHazards.push(pitData);
+  }
+
+  // Zipper quicksand: encontra a seção sob a posição Z do jogador
+  getQuicksandSegmentAt(pitData, z) {
+    const rel = z - pitData.z; // + = lado da entrada (herói), - = lado da saída
+    for (const s of pitData.segments) {
+      if (rel <= s.maxOffset && rel >= s.minOffset) return s;
+    }
+    return null;
+  }
+
+  // Zipper quicksand: a seção sob os pés está aberta?
+  isQuicksandOpenAt(pitData, z) {
+    if (Math.abs(z - pitData.z) >= pitData.radius) return false;
+    const seg = this.getQuicksandSegmentAt(pitData, z);
+    if (seg) return seg.isOpen;
+    return pitData.isOpen;
   }
 
   addWaterPond(group, screenIndex, centerZ, length = 20) {
@@ -746,47 +773,69 @@ export class World {
       }
     });
 
-    // 7. Update Disappearing Quicksand Pits (Opening & Closing cycle)
+    // 7. Update Disappearing Quicksand Pits (Zipper cycle per section)
+    // Fases: fechado e sólido (2.8s) -> abrindo em onda da entrada até a saída
+    // (1.8s) -> totalmente aberto (1.6s) -> fechando em zíper entrada->saída
+    // (1.2s). Total: 7.4s. Cada seção parte-se ao meio (X) e afunda (Y).
     this.activeOpeningPits.forEach(p => {
       p.timer += delta;
-      // Cycle: 5.4s total (2.8s closed, 0.4s opening, 1.8s fully open, 0.4s closing)
-      const cycleTime = p.timer % 5.4;
-      let targetY = 0;
+      const n = p.numSegments;
+      const total = p.closedDur + p.openingDur + p.openDur + p.closingDur;
+      const cycleTime = p.timer % total;
 
-      if (cycleTime < 2.8) {
-        // STATE: CLOSED (SOLID GROUND - SAFE TO SPRINT ACROSS!)
-        p.isOpen = false;
-        targetY = 0;
+      let phase = 'closed';
+      if (cycleTime < p.closedDur) {
+        phase = 'closed';
+      } else if (cycleTime < p.closedDur + p.openingDur) {
+        phase = 'opening';
+      } else if (cycleTime < p.closedDur + p.openingDur + p.openDur) {
+        phase = 'open';
+      } else {
+        phase = 'closing';
+      }
+      p.phase = phase;
 
+      // Sons de transição do ciclo global
+      if (phase === 'opening') {
+        if (!p.rumblePlayed) {
+          audio.playQuicksandRumble();
+          p.rumblePlayed = true;
+        }
+      } else if (phase === 'closed') {
         if (p.wasOpen) {
           audio.playGroundThud();
           p.wasOpen = false;
           p.rumblePlayed = false;
         }
-      } else if (cycleTime < 3.2) {
-        // STATE: PRE-OPEN RUMBLE & SINKING
-        if (!p.rumblePlayed) {
-          audio.playQuicksandRumble();
-          p.rumblePlayed = true;
-        }
-        p.isOpen = true;
-        const t = (cycleTime - 2.8) / 0.4;
-        targetY = -t * 1.3;
-      } else if (cycleTime < 5.0) {
-        // STATE: FULLY OPEN (DEADLY SINKHOLE!)
-        p.isOpen = true;
-        p.wasOpen = true;
-        targetY = -1.3;
-      } else {
-        // STATE: RISING / CLOSING
-        p.isOpen = true;
-        const t = (5.4 - cycleTime) / 0.4;
-        targetY = -t * 1.3;
       }
 
-      // Smooth plug movement
-      p.pit.currentY = THREE.MathUtils.lerp(p.pit.currentY || 0, targetY, delta * 14);
-      p.pit.plug.position.y = p.pit.currentY;
+      let openCount = 0;
+      p.segments.forEach((seg, i) => {
+        // Instante em que esta seção deve estar aberta (alvo binário 0/1).
+        // Onda da entrada (i=0, +Z) até a saída (i=n-1, -Z) tanto a abrir como a fechar.
+        const openStart = p.closedDur + (i * p.openingDur) / n;
+        const closeStart = p.closedDur + p.openingDur + p.openDur + (i * p.closingDur) / n;
+        const target = cycleTime >= openStart && cycleTime < closeStart ? 1 : 0;
+
+        // Abertura/fecho suave da seção
+        seg.openAmount = THREE.MathUtils.lerp(seg.openAmount ?? 0, target, delta * 10);
+        if (Math.abs(seg.openAmount - target) < 0.01) seg.openAmount = target;
+        seg.isOpen = seg.openAmount > 0.5;
+        if (seg.isOpen) openCount++;
+
+        // Metades partem-se do meio para as laterais (X) e afundam (Y)
+        const sep = seg.openAmount * 1.4;
+        const sink = seg.openAmount * 1.4;
+        // Tremor de terremoto enquanto a seção está em movimento
+        const moving = Math.abs(target - seg.openAmount) > 0.02 ? 1 : 0;
+        const jitter = moving * Math.sin(p.timer * 50 + i * 2.1) * 0.06;
+        seg.leftMesh.position.set(seg.baseOffset - sep + jitter, -sink, seg.baseOffset);
+        seg.rightMesh.position.set(seg.baseOffset + sep + jitter, -sink, seg.baseOffset);
+      });
+
+      p.openCount = openCount;
+      p.isOpen = openCount > 0;
+      if (openCount > 0) p.wasOpen = true;
     });
   }
 }
