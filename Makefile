@@ -5,9 +5,17 @@ HOST ?= 0.0.0.0
 REGISTRY ?= git.rscs.pt
 REGISTRY_USER ?= ruisantos
 IMAGE ?= $(REGISTRY)/ruisantos/pitfall
-TAG ?= arm64
-PLATFORM ?= linux/arm64
+HOST_OS ?= $(shell uname -s)
+HOST_ARCH ?= $(shell uname -m)
 REGISTRY_TOKEN ?= $(GITEA_TOKEN)
+
+ifneq ($(filter arm64 aarch64,$(HOST_ARCH)),)
+  PLATFORM ?= linux/arm64
+  TAG ?= arm64
+else
+  PLATFORM ?= linux/amd64
+  TAG ?= latest
+endif
 
 # Default target: launch the game
 all: run
@@ -47,7 +55,7 @@ deploy:
 
 ## publish: Construir e publicar a imagem Docker no package registry do Gitea
 publish:
-	@echo "🔨 Construindo imagem $(IMAGE):$(TAG)..."
+	@echo "🔨 Construindo imagem $(IMAGE):$(TAG) para $(PLATFORM) ($(HOST_OS)/$(HOST_ARCH))..."
 	docker build --platform $(PLATFORM) --tag $(IMAGE):$(TAG) .
 	@if [ -n "$(REGISTRY_TOKEN)" ]; then \
 		echo "🔐 Autenticando no registry $(REGISTRY)..."; \
