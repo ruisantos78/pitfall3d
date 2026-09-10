@@ -30,7 +30,11 @@ export class World {
 
     // Base materials
     this.groundMaterial = createVoxelMaterial();
-    this.waterMaterial = new THREE.MeshBasicMaterial({ color: 0x0044aa });
+    this.waterMaterial = new THREE.MeshLambertMaterial({
+      color: 0x1a6aaa,
+      transparent: true,
+      opacity: 0.85,
+    });
     this.pitMaterial = new THREE.MeshBasicMaterial({ color: 0x181818 });
     this.quicksandMaterial = new THREE.MeshBasicMaterial({ color: 0x6e5225 });
 
@@ -188,6 +192,7 @@ export class World {
       const groundGeo = createVoxelGeometry(groundVoxels, 1.0, false);
       const groundMesh = new THREE.Mesh(groundGeo, this.groundMaterial);
       groundMesh.position.set(0, -1.0, startZ);
+      groundMesh.receiveShadow = true;
       group.add(groundMesh);
     }
 

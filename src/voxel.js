@@ -113,12 +113,12 @@ export function createVoxelGeometry(voxels, voxelSize = 0.5, center = true) {
           );
           normals.push(face.normal[0], face.normal[1], face.normal[2]);
 
-          // Subtle ambient occlusion / directional shading per face for retro pixel depth
+          // Soft directional shading per face for gentle voxel depth
           let shade = 1.0;
-          if (face.dir[1] === 1) shade = 1.15; // top highlight
-          else if (face.dir[1] === -1) shade = 0.65; // bottom shadow
-          else if (face.dir[0] !== 0) shade = 0.85; // side shadow
-          else if (face.dir[2] < 0) shade = 0.75; // back shadow
+          if (face.dir[1] === 1) shade = 1.08; // soft top highlight
+          else if (face.dir[1] === -1) shade = 0.78; // soft bottom shadow
+          else if (face.dir[0] !== 0) shade = 0.92; // soft side shadow
+          else if (face.dir[2] < 0) shade = 0.88; // soft back shadow
 
           colors.push(
             Math.min(1, color.r * shade),

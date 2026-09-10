@@ -26,8 +26,8 @@ class Game {
     // 1. Scene & Atari 2600 Jungle Atmosphere
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x3888c8); // Atari bright jungle sky
-    // Fog blending the corridor into the deep jungle
-    this.scene.fog = new THREE.Fog(0x204820, 25, 85);
+    // Fog blending the corridor into the deep jungle (soft haze matching the sky)
+    this.scene.fog = new THREE.Fog(0x8fb8c8, 30, 95);
 
     // 2. Camera
     this.camera = new THREE.PerspectiveCamera(
@@ -40,21 +40,40 @@ class Game {
     // 3. Renderer
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: false, // sharper retro pixel edges!
+      antialias: true, // smooth voxel edges
       powerPreference: 'high-performance',
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.1;
 
-    // 4. Lighting: Crisp arcade lighting
-    const ambientLight = new THREE.AmbientLight(0xd8ecd0, 1.4);
+    // 4. Lighting: soft jungle lighting
+    const ambientLight = new THREE.AmbientLight(0xd8ecd0, 1.0);
     this.scene.add(ambientLight);
 
-    const sunLight = new THREE.DirectionalLight(0xfffae0, 1.6);
-    sunLight.position.set(15, 30, 20);
-    this.scene.add(sunLight);
+    // Hemisphere fill for transições suaves céu-solo
+    const hemiLight = new THREE.HemisphereLight(0xbfe3ff, 0x2e5a24, 0.55);
+    this.scene.add(hemiLight);
 
-    const backLight = new THREE.DirectionalLight(0x408040, 0.6);
+    const sunLight = new THREE.DirectionalLight(0xfffae0, 1.5);
+    sunLight.position.set(15, 30, 20);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.set(2048, 2048);
+    sunLight.shadow.camera.left = -25;
+    sunLight.shadow.camera.right = 25;
+    sunLight.shadow.camera.top = 25;
+    sunLight.shadow.camera.bottom = -25;
+    sunLight.shadow.camera.near = 1;
+    sunLight.shadow.camera.far = 90;
+    sunLight.shadow.bias = -0.0005;
+    this.scene.add(sunLight);
+    this.scene.add(sunLight.target);
+    this.sunLight = sunLight;
+
+    const backLight = new THREE.DirectionalLight(0x408040, 0.5);
     backLight.position.set(-15, 20, -20);
     this.scene.add(backLight);
   }
@@ -164,6 +183,11 @@ class Game {
 
       // 4. Update HUD
       this.hud.update(this.player, currentScreenIndex, this.world);
+
+      // 5. Keep sun/shadow frustum following the player down the corridor
+      this.sunLight.position.set(15, 30, this.player.z + 20);
+      this.sunLight.target.position.set(0, 0, this.player.z);
+      this.sunLight.target.updateMatrixWorld();
     }
 
     // Render 3D Scene
