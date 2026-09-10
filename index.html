@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ATARI PITFALL 3D - Primeira Pessoa (FPS)</title>
+    <!-- Retro Atari font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <!-- Main 3D Canvas -->
+    <div id="game-container">
+      <canvas id="webgl-canvas"></canvas>
+
+      <!-- Retro CRT scanlines and vignette overlay -->
+      <div id="crt-overlay" class="crt"></div>
+
+      <!-- Atari 2600 Pitfall HUD -->
+      <div id="hud">
+        <div class="hud-top-row">
+          <div class="hud-box score-box">
+            <span class="hud-label">PONTOS</span>
+            <span id="score-display" class="hud-val">002000</span>
+          </div>
+
+          <div class="hud-box timer-box">
+            <span class="hud-label">TEMPO</span>
+            <span id="timer-display" class="hud-val">20:00</span>
+          </div>
+
+          <div class="hud-box lives-box">
+            <span class="hud-label">VIDAS</span>
+            <div id="lives-display" class="lives-icons">
+              <span class="life-icon">▲</span>
+              <span class="life-icon">▲</span>
+              <span class="life-icon">▲</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-bottom-row">
+          <div class="hud-box screen-box">
+            <span class="hud-label">TELA</span>
+            <span id="screen-display" class="hud-val">001</span>
+          </div>
+
+          <div class="hud-box vine-status" id="vine-prompt">
+            <span class="blink">AGARRADO AO CIPO! [ESPAÇO] PARA SOLTAR</span>
+          </div>
+
+          <div class="hud-box croc-status" id="croc-prompt">
+            <span id="croc-status-text">🐊 BOCA FECHADA: SEGURO PISAR!</span>
+          </div>
+
+          <div class="hud-box treasures-box">
+            <span class="hud-label">TESOUROS</span>
+            <span id="treasure-display" class="hud-val">0</span>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- Audio / CRT Toggles -->
+      <div id="top-controls">
+        <button id="btn-sound" class="retro-btn" title="Alternar Som">🔊 SOM: LIGADO</button>
+        <button id="btn-crt" class="retro-btn" title="Alternar Filtro CRT">📺 CRT: ON</button>
+      </div>
+
+      <!-- Start / Instructions Overlay -->
+      <div id="start-overlay" class="overlay">
+        <div class="retro-card">
+          <h1 class="game-title">PITFALL! 3D</h1>
+          <h2 class="game-subtitle">EDIÇÃO EM PRIMEIRA PESSOA (VOXEL RETRO)</h2>
+
+          <div class="instructions-box">
+            <p class="rule-highlight">★ CONTROLES ORIGINAIS DO ATARI 2600 ★</p>
+            <ul>
+              <li><strong>[W] ou [↑] ou [Arrastar Cima]:</strong> Andar para FRENTE</li>
+              <li><strong>[S] ou [↓] ou [Arrastar Baixo]:</strong> Andar para TRÁS</li>
+              <li><strong>[ESPAÇO] / [CLIQUE]:</strong> PULAR ou SOLTAR O CIPÓ</li>
+            </ul>
+            <div class="mechanics-guide">
+              <p>🌿 <strong>CIPÓ:</strong> Agarrado <em>automaticamente</em> ao tocar! Pressione <strong>[ESPAÇO]</strong> para soltar e cruzar abismos e crocodilos!</p>
+              <p>🐊 <strong>CROCODILOS:</strong> Só pise em suas cabeças quando a boca estiver FECHADA!</p>
+              <p>🪵 <strong>TRONCOS:</strong> Pule sobre eles para não tropeçar e perder pontos!</p>
+              <p>💎 <strong>TESOUROS:</strong> Colete barras de ouro, prata, diamantes e sacos de dinheiro!</p>
+              <p>⏳ Você tem <strong>20 minutos</strong> para explorar a selva e pontuar o máximo!</p>
+            </div>
+          </div>
+
+          <button id="start-btn" class="retro-btn-large">▶ INICIAR EXPEDIÇÃO</button>
+        </div>
+      </div>
+
+      <!-- Game Over Overlay -->
+      <div id="gameover-overlay" class="overlay hidden">
+        <div class="retro-card">
+          <h1 class="game-title death-title">FIM DE JOGO</h1>
+          <p id="gameover-reason" class="gameover-text">Você perdeu todas as vidas na selva!</p>
+          <div class="stats-summary">
+            <p>PONTUAÇÃO FINAL: <span id="final-score">000000</span></p>
+            <p>TELAS PERCORRIDAS: <span id="final-screens">0</span></p>
+            <p>TESOUROS RESGATADOS: <span id="final-treasures">0</span></p>
+          </div>
+          <button id="restart-btn" class="retro-btn-large">🔄 TENTAR NOVAMENTE</button>
+        </div>
+      </div>
+
+      <!-- Mobile Touch Controls -->
+      <div id="mobile-controls">
+        <div class="mobile-stick-col">
+          <button id="btn-forward" class="touch-btn">▲<br>FRENTE</button>
+          <button id="btn-backward" class="touch-btn">▼<br>TRÁS</button>
+        </div>
+        <div class="mobile-action-col">
+          <button id="btn-action" class="touch-btn action-touch-btn">PULAR /<br>SOLTAR</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
