@@ -66,7 +66,8 @@ pitfall/
     ├── models.js        # Geradores de modelos voxel 3D (jacaré, cipó, fogueira, etc.)
     ├── voxel.js         # Algoritmo de geometria voxel otimizada com face-culling
     ├── audio.js         # Sintetizador Web Audio API puro com efeitos 8-bit
-    └── hud.js           # Painel HUD, score, timer, vidas e avisos contextuais
+15:     └── hud.js           # Painel HUD, score, timer, vidas e avisos contextuais
+16:     └── i18n.js          # Idiomas PT/EN + preferências (localStorage: pitfall3d-settings)
 ```
 
 ### Detalhamento dos Módulos:
@@ -85,7 +86,7 @@ pitfall/
   - `getSurfaceElevation(world, z)`: Retorna a elevação do solo (`0.0`), topo do jacaré (`0.35`) ou abismo (`-10.0`).
   - `checkVineGrab(world)`: Detecta proximidade com a ponta do cipó e ancora o jogador.
   - `releaseVine()`: Solta o cipó com momento parabólico.
-  - `die(reason)`: Dispara `audio.playLifeLost()` quando ainda restam vidas (`lives > 0`) e `audio.playGameOver()` ao perder a última vida, acionando a tela de fim de jogo.
+  - `die(reasonKey)`: recebe uma CHAVE do dicionário (`death.*` em `i18n.js`), nunca texto literal; traduzida só em `triggerGameOver()` via `t()`. Dispara `audio.playLifeLost()` quando ainda restam vidas (`lives > 0`) e `audio.playGameOver()` ao perder a última vida, acionando a tela de fim de jogo.
 
 #### [`src/world.js`](file:///home/ruisantos/Projects/pitfall/src/world.js)
 - **Nivelamento Global da Superfície do Solo:**
@@ -98,7 +99,7 @@ pitfall/
   - `START_TRAIL` (tronco inicial)
   - `STATIONARY_LOGS` (dois troncos)
   - `DISAPPEARING_QUICKSAND` (areia movediça móvel de 9m)
-  - `QUICKSAND_VINE` (poço de areia movediça de 20m com cipó)
+  - `QUICKSAND_VINE` (lago azul de 20m com cipó — travessia só pelo cipó)
   - `ROLLING_LOGS` (troncos rolantes)
   - `CROCODILE_POND` (lagoa com 3 jacarés espaçados em `[5, 0, -5]`)
   - `QUICKSAND_AND_LOG` (areia movediça móvel + tronco rolante)
@@ -126,7 +127,7 @@ pitfall/
   - Base com anel de pedras, leito de cinzas e brasas vivas aterrado em `Y = 0.0` com `center = 'bottom'`.
   - Troncos em pirâmide e chamas em camadas subindo de `Y = 0.22` até ~2.0m, com faíscas dinâmicas e luz quente.
 - `createTreasureModel(type, voxelSize = 0.22)`:
-  - Saco de dinheiro com cifrão `$`, barras de ouro/prata e anel de diamante com base em `Y = 0.0` (`center = 'bottom'`).
+  - Saco de dinheiro com cifrão `$`, barras de ouro/prata e anel de diamante com aro dourado de 2 camadas; o diamante é erguido (`liftY = 0.3` em `addTreasure`) para o aro não parecer afundado no solo.
   - Posicionado a `Y = 0.05` para rotação suave e visibilidade total sobre a trilha.
 - `createScorpionModel(voxelSize = 0.28)`:
   - Escorpião arcade gigante de alta visibilidade com carapaça vermelha vibrante e faixas obsidianas/douradas.
@@ -148,6 +149,13 @@ pitfall/
   - Contador progressivo contínuo de tesouros (`player.treasuresCollected`), sem sufixo ou teto fixo de 32.
   - Indicadores dinâmicos de proximidade: aviso de perigo/segurança da boca do jacaré e prompt de agarre do cipó.
   - Alternador de áudio e filtro CRT retro com scanlines.
+  - Textos dinâmicos sempre via `t()` de `i18n.js` (nunca literais PT/EN); avisos de ajuda (`croc-status`) ocultáveis via `getShowHelp()`.
+
+#### [`src/i18n.js`](file:///home/ruisantos/Projects/pitfall/src/i18n.js)
+- Dicionário PT/EN (69 chaves por idioma) + preferências em `localStorage` (`pitfall3d-settings`: `{ lang, showHelp, highScore }`).
+- HTML estático usa `data-i18n` (texto), `data-i18n-aria` (`aria-label`) e `data-i18n-title` (`title`); `setLanguage()` reaplica tudo e ajusta `<html lang>`.
+- Menu OPÇÕES tem seletor de idioma (🇧🇷/🇺🇸) e toggle `AJUDA NA TELA` (`setShowHelp`); rótulos dos toggles som/CRT/touch são reaplicados via `HUD.refreshOptionsLabels(player)`.
+- Recorde (`highScore`) gravado via `submitScore()` só no game over (padrão arcade), exibido no menu inicial (`#highscore-display`) e na tela de fim de jogo (`#final-highscore` + selo `#new-record`); `Game.backToMenu()` volta ao menu reexibindo a vista principal.
 
 #### [`src/audio.js`](file:///home/ruisantos/Projects/pitfall/src/audio.js)
 - Motor de áudio sem arquivos externos. Métodos:

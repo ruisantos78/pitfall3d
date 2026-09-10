@@ -36,7 +36,6 @@ export class World {
       opacity: 0.85,
     });
     this.pitMaterial = new THREE.MeshBasicMaterial({ color: 0x181818 });
-    this.quicksandMaterial = new THREE.MeshBasicMaterial({ color: 0x6e5225 });
 
     // Shared tree template for cloning
     this.treeTemplate = createTreeModel(0.5);
@@ -133,7 +132,7 @@ export class World {
     const pattern = [
       'STATIONARY_LOGS',
       'DISAPPEARING_QUICKSAND', // Classic opening & closing quicksand hole!
-      'QUICKSAND_VINE',         // Tar/quicksand with swinging vine
+      'QUICKSAND_VINE',         // Lago azul com cipó
       'ROLLING_LOGS',
       'CROCODILE_POND',
       'QUICKSAND_AND_LOG',      // Disappearing quicksand + rolling log
@@ -279,8 +278,8 @@ export class World {
         break;
 
       case 'QUICKSAND_VINE':
-        // Quicksand pit with swinging vine
-        this.addQuicksandPit(group, index, midZ, 20);
+        // Lago azul com cipó (travessia só pelo cipó)
+        this.addWaterPond(group, index, midZ, 20);
         this.addVine(group, index, midZ);
         this.addTreasure(group, index, midZ - 14, 'gold');
         break;
@@ -403,23 +402,6 @@ export class World {
       screenIndex,
       minZ: startZ - length,
       maxZ: startZ,
-      centerZ,
-    });
-  }
-
-  addQuicksandPit(group, screenIndex, centerZ, length = 20) {
-    const pitGeo = new THREE.BoxGeometry(PATH_WIDTH, 0.2, length);
-    const pitMesh = new THREE.Mesh(pitGeo, this.quicksandMaterial);
-    pitMesh.position.set(0, -0.6, centerZ);
-    group.add(pitMesh);
-    // Abismo negro sem fim abaixo da superfície
-    this.addBottomlessShaft(group, centerZ, length);
-
-    this.activeHazards.push({
-      type: 'quicksand',
-      screenIndex,
-      minZ: centerZ - length / 2 + 1,
-      maxZ: centerZ + length / 2 - 1,
       centerZ,
     });
   }
@@ -579,7 +561,9 @@ export class World {
 
   addTreasure(group, screenIndex, z, type = 'gold') {
     const treasure = createTreasureModel(type, 0.22);
-    treasure.mesh.position.set(0, 0.05, z);
+    // O anel de diamante é erguido para o aro dourado não parecer afundado no solo
+    const liftY = type === 'diamond' ? 0.3 : 0.05;
+    treasure.mesh.position.set(0, liftY, z);
     group.add(treasure.mesh);
 
     this.activeTreasures.push({

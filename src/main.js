@@ -5,6 +5,7 @@ import { audio } from './audio.js';
 import { World, SCREEN_LENGTH } from './world.js';
 import { Player } from './player.js';
 import { HUD } from './hud.js';
+import { t, getLanguage, setLanguage, getShowHelp, setShowHelp, getHighScore, applyStaticTexts } from './i18n.js';
 
 class Game {
   constructor() {
@@ -91,15 +92,26 @@ class Game {
   }
 
   bindEvents() {
-    window.addEventListener('resize', () => {
+    const handleResize = () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+    };
+    window.addEventListener('resize', handleResize);
+    // No mobile a barra do navegador mostra/esconde sem disparar resize clássico
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleResize);
+    }
 
     const startBtn = document.getElementById('start-btn');
     const startOverlay = document.getElementById('start-overlay');
     const restartBtn = document.getElementById('restart-btn');
+    const menuBtn = document.getElementById('menu-btn');
+    const optionsBtn = document.getElementById('options-btn');
+    const optionsBackBtn = document.getElementById('options-back-btn');
+    const menuMain = document.getElementById('menu-main');
+    const menuOptions = document.getElementById('menu-options');
+    const optionsMenu = document.getElementById('options-menu');
 
     const startGame = () => {
       if (this.isRunning) return;
@@ -117,6 +129,54 @@ class Game {
       });
     }
 
+    // Menu de opções: alterna as vistas sem iniciar o jogo
+    const showOptions = (show) => {
+      if (menuMain) menuMain.classList.toggle('hidden', show);
+      if (menuOptions) menuOptions.classList.toggle('hidden', !show);
+    };
+
+    if (optionsBtn) {
+      optionsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showOptions(true);
+      });
+    }
+
+    if (optionsBackBtn) {
+      optionsBackBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showOptions(false);
+      });
+    }
+
+    // Cliques nos toggles (som/CRT/touch) não podem iniciar o jogo
+    if (optionsMenu) {
+      optionsMenu.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+    }
+
+    // Opções: idioma (PT/EN) e ajuda na tela, persistidos no browser
+    this.btnLangPt = document.getElementById('btn-lang-pt');
+    this.btnLangEn = document.getElementById('btn-lang-en');
+    this.btnHelp = document.getElementById('btn-help');
+
+    if (this.btnLangPt) {
+      this.btnLangPt.addEventListener('click', () => this.switchLanguage('pt'));
+    }
+    if (this.btnLangEn) {
+      this.btnLangEn.addEventListener('click', () => this.switchLanguage('en'));
+    }
+    if (this.btnHelp) {
+      this.btnHelp.addEventListener('click', () => {
+        setShowHelp(!getShowHelp());
+        this.refreshOptionsUI();
+      });
+    }
+
+    // Aplica as preferências salvas (idioma + ajuda) logo na abertura
+    this.refreshOptionsUI();
+
     if (startOverlay) {
       startOverlay.addEventListener('click', () => {
         startGame();
@@ -129,6 +189,13 @@ class Game {
       });
     }
 
+    if (menuBtn) {
+      menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.backToMenu();
+      });
+    }
+
     // Allow Space or Enter or W or Up arrow to start / restart smoothly
     window.addEventListener('keydown', (e) => {
       if (!this.isRunning) {
@@ -137,7 +204,9 @@ class Game {
             this.restartGame();
           }
         } else {
-          if (['Space', 'Enter', 'KeyW', 'ArrowUp'].includes(e.code)) {
+          // Com o menu de opções aberto, o teclado não inicia o jogo
+          const optionsOpen = menuOptions && !menuOptions.classList.contains('hidden');
+          if (!optionsOpen && ['Space', 'Enter', 'KeyW', 'ArrowUp'].includes(e.code)) {
             startGame();
           }
         }
@@ -145,20 +214,65 @@ class Game {
     });
   }
 
+  switchLanguage(lang) {
+    setLanguage(lang);
+    this.refreshOptionsUI();
+  }
+
+  // Sincroniza toda a UI de opções com as preferências salvas
+  refreshOptionsUI() {
+    applyStaticTexts();
+    document.documentElement.lang = getLanguage() === 'pt' ? 'pt-BR' : 'en';
+    if (this.hud) this.hud.refreshOptionsLabels(this.player);
+    const highscoreDisplay = document.getElementById('highscore-display');
+    if (highscoreDisplay) highscoreDisplay.textContent = String(getHighScore()).padStart(6, '0');
+    if (this.btnLangPt) this.btnLangPt.classList.toggle('active', getLanguage() === 'pt');
+    if (this.btnLangEn) this.btnLangEn.classList.toggle('active', getLanguage() === 'en');
+    if (this.btnHelp) {
+      const txt = this.btnHelp.querySelector('.btn-txt');
+      const label = t(getShowHelp() ? 'opt.helpOn' : 'opt.helpOff');
+      if (txt) txt.textContent = ` ${label}`;
+      else this.btnHelp.textContent = `💡 ${label}`;
+    }
+  }
   restartGame() {
     // Reset player
     this.player.reset();
 
-    // Rebuild initial screens
+    this.rebuildWorld();
+
+    this.isRunning = true;
+    this.lastTime = performance.now();
+  }
+
+  // Volta para o menu inicial (após o game over)
+  backToMenu() {
+    this.player.reset();
+    this.rebuildWorld();
+
+    this.isRunning = false;
+    this.lastTime = performance.now();
+
+    // Sempre reabre na vista principal do menu
+    const menuMain = document.getElementById('menu-main');
+    const menuOptions = document.getElementById('menu-options');
+    if (menuMain) menuMain.classList.remove('hidden');
+    if (menuOptions) menuOptions.classList.add('hidden');
+
+    const startOverlay = document.getElementById('start-overlay');
+    if (startOverlay) startOverlay.classList.remove('hidden');
+
+    this.refreshOptionsUI();
+  }
+
+  // Remove as telas atuais e regenera do zero (uso no restart e na volta ao menu)
+  rebuildWorld() {
     for (const [idx, screen] of this.world.screens.entries()) {
       this.scene.remove(screen.group);
       this.world.removeScreenEntities(screen);
     }
     this.world.screens.clear();
     this.world.updateVisibleScreens(0);
-
-    this.isRunning = true;
-    this.lastTime = performance.now();
   }
 
   animate() {

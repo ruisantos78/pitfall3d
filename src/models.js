@@ -653,17 +653,19 @@ export function createTreasureModel(type = 'gold', voxelSize = 0.22) {
     }
   } else if (type === 'diamond') {
     points = 5000;
-    // Golden ring base
-    for (let x = -2; x <= 2; x++) {
-      for (let z = -2; z <= 2; z++) {
-        if (Math.abs(x) === 2 || Math.abs(z) === 2) {
-          voxels.push({ x, y: 0, z, color: C.DIAMOND_BAND });
+    // Golden ring base (2 camadas para o aro não parecer afundado no solo)
+    for (let y = 0; y <= 1; y++) {
+      for (let x = -2; x <= 2; x++) {
+        for (let z = -2; z <= 2; z++) {
+          if (Math.abs(x) === 2 || Math.abs(z) === 2) {
+            voxels.push({ x, y, z, color: C.DIAMOND_BAND });
+          }
         }
       }
     }
     // Sparkling Diamond gem atop
-    for (let y = 1; y <= 3; y++) {
-      const w = y === 2 ? 2 : 1;
+    for (let y = 2; y <= 4; y++) {
+      const w = y === 3 ? 2 : 1;
       for (let x = -w; x <= w; x++) {
         for (let z = -w; z <= w; z++) {
           voxels.push({ x, y, z, color: C.DIAMOND });

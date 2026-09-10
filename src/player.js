@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { audio } from './audio.js';
 import { SCREEN_LENGTH } from './world.js';
 import { createPlayerArmsModel } from './models.js';
+import { t, getHighScore, submitScore } from './i18n.js';
 
 export const GRAVITY = 28.0;
 export const JUMP_VELOCITY = 10.5;
@@ -39,6 +40,7 @@ export class Player {
     this.isGameOver = false;
     this.isDying = false;
     this.deathTimer = 0;
+    this.deathReasonKey = 'death.lifeLost';
     this.tripCooldown = 0;
     this.isTripped = false; // Caiu de cara no chão e aguarda uma nova direção
     // Queda do céu no respawn (como no original): nasce lá no alto e despenca.
@@ -110,12 +112,20 @@ export class Player {
     }
 
     if (btnTouchToggle && touchControls) {
-      btnTouchToggle.textContent = this.touchOnly ? '📱 TOUCH: ON' : '📱 TOUCH: OFF';
+      this.btnTouchToggle = btnTouchToggle;
+      const setTouchLabel = () => {
+        const txt = btnTouchToggle.querySelector('.btn-txt');
+        const label = t(this.touchOnly ? 'opt.touchOn' : 'opt.touchOff');
+        if (txt) txt.textContent = ` ${label}`;
+        else btnTouchToggle.textContent = `📱 ${label}`;
+      };
+      this.refreshTouchLabel = setTouchLabel;
+      setTouchLabel();
       btnTouchToggle.addEventListener('click', () => {
         const isVisible = touchControls.classList.toggle('touch-visible');
         touchControls.classList.toggle('touch-hidden', !isVisible);
         this.touchOnly = isVisible;
-        btnTouchToggle.textContent = isVisible ? '📱 TOUCH: ON' : '📱 TOUCH: OFF';
+        setTouchLabel();
       });
     }
 
@@ -175,7 +185,7 @@ export class Player {
     this.timeRemaining -= delta;
     if (this.timeRemaining <= 0) {
       this.timeRemaining = 0;
-      this.die('Tempo esgotado!');
+      this.die('death.timeUp');
       return;
     }
 
@@ -200,7 +210,7 @@ export class Player {
       // Only bite if on the FRONT MOUTH (Z > croc.z + 0.8). If on the eyes/skull, 100% IMMUNE!
       if (croc && croc.isOpen && this.z > croc.z + 0.8) {
         audio.playChomp();
-        this.die('O jacaré abriu a boca e mordeu você! (Fique sobre os OLHOS para ficar seguro)');
+        this.die('death.crocBite');
         return;
       }
     }
@@ -211,7 +221,7 @@ export class Player {
       for (const pitData of world.activeOpeningPits) {
         if (world.isQuicksandOpenAt(pitData, this.z)) {
           audio.playSink();
-          this.die('A areia movediça se abriu sob seus pés!');
+          this.die('death.quicksand');
           return;
         }
       }
@@ -229,16 +239,25 @@ export class Player {
 
   updateNormalMovement(delta, world) {
     // Depois de tropeçar, fica de cara no chão até o jogador pressionar uma
-    // direção novamente. A própria direção que o levanta também retoma a marcha.
+    // direção ou o botão de pulo. A direção que o levanta também retoma a
+    // marcha; o pulo só levanta (o pulo em si exige um novo toque).
     if (this.isTripped) {
       this.vz = 0;
       this.vy = 0;
+      const jumpPressed = this.actionJustPressed;
       this.actionJustPressed = false;
 
       const standingSurfaceY = this.getSurfaceElevation(world, this.z);
       if (standingSurfaceY > -5) {
         this.y = standingSurfaceY;
         this.isGrounded = true;
+      }
+
+      // Botão de pulo levanta na hora (toque único, sem delay de segurar)
+      if (jumpPressed) {
+        this.isTripped = false;
+        this.tripStandTimer = 0;
+        return;
       }
 
       if (!this.moveForward && !this.moveBackward) {
@@ -298,7 +317,7 @@ export class Player {
         // Fell into pit / water / quicksand!
         if (this.y < -1.2) {
           audio.playSink();
-          this.die('Você afundou no abismo / areia movediça!');
+          this.die('death.abyss');
           return;
         }
       }
@@ -341,7 +360,7 @@ export class Player {
               if (croc.isOpen && isOnMouth) {
                 // Stepped directly into the open mouth!
                 audio.playChomp();
-                this.die('Mordido pela boca aberta do jacaré! (Fique sobre os OLHOS para ficar seguro)');
+                this.die('death.crocMouth');
                 return -10;
               }
 
@@ -497,7 +516,7 @@ export class Player {
         const distZ = Math.abs(this.z - hazard.z);
         if (distZ < 1.1 && this.y < 0.9) {
           audio.playTrip();
-          this.die('Queimado pela fogueira!');
+          this.die('death.fire');
           return;
         }
       } else if (hazard.type === 'scorpion') {
@@ -505,7 +524,7 @@ export class Player {
         const distZ = Math.abs(this.z - hazard.z);
         if (distZ < 1.1 && this.y < 0.75) {
           audio.playTrip();
-          this.die('Picado por um escorpião venenoso!');
+          this.die('death.scorpion');
           return;
         }
       }
@@ -600,10 +619,11 @@ export class Player {
     }
   }
 
-  die(reason = 'Você perdeu uma vida!') {
+  die(reasonKey = 'death.lifeLost') {
     if (this.isDying || this.isGameOver) return;
     this.isDying = true;
     this.deathTimer = 1.2;
+    this.deathReasonKey = reasonKey;
     this.lives--;
 
     // Detach from vine if attached
@@ -618,7 +638,7 @@ export class Player {
       this.isGameOver = true;
       audio.playGameOver();
       setTimeout(() => {
-        this.triggerGameOver(reason);
+        this.triggerGameOver();
       }, 1000);
     } else {
       audio.playLifeLost();
@@ -649,15 +669,22 @@ export class Player {
     this.camera.position.set(0, this.y + EYE_HEIGHT, this.z);
   }
 
-  triggerGameOver(reason) {
+  triggerGameOver() {
     const overlay = document.getElementById('gameover-overlay');
     const reasonText = document.getElementById('gameover-reason');
     const finalScore = document.getElementById('final-score');
     const finalScreens = document.getElementById('final-screens');
     const finalTreasures = document.getElementById('final-treasures');
+    const newRecordEl = document.getElementById('new-record');
+    const finalHighscore = document.getElementById('final-highscore');
+
+    // Recorde persistido no browser (só conta no fim do jogo, padrão arcade)
+    const isNewRecord = submitScore(this.score);
 
     if (overlay) overlay.classList.remove('hidden');
-    if (reasonText) reasonText.textContent = reason;
+    if (reasonText) reasonText.textContent = t(this.deathReasonKey || 'death.lifeLost');
+    if (newRecordEl) newRecordEl.classList.toggle('hidden', !isNewRecord);
+    if (finalHighscore) finalHighscore.textContent = String(getHighScore()).padStart(6, '0');
     if (finalScore) finalScore.textContent = String(this.score).padStart(6, '0');
     if (finalScreens) finalScreens.textContent = Math.floor(Math.abs(this.z) / 60) + 1;
     if (finalTreasures) finalTreasures.textContent = `${this.treasuresCollected}`;
@@ -676,6 +703,7 @@ export class Player {
     this.isGameOver = false;
     this.isDying = false;
     this.deathTimer = 0;
+    this.deathReasonKey = 'death.lifeLost';
     this.attachedVine = null;
     this.tripCooldown = 0;
     this.isTripped = false;

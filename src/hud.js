@@ -1,5 +1,6 @@
 // Atari 2600 Pitfall HUD & UI Management
 import { audio } from './audio.js';
+import { t, getShowHelp, getHighScore } from './i18n.js';
 
 export class HUD {
   constructor() {
@@ -8,6 +9,7 @@ export class HUD {
     this.livesEl = document.getElementById('lives-display');
     this.screenEl = document.getElementById('screen-display');
     this.treasuresEl = document.getElementById('treasure-display');
+    this.recordEl = document.getElementById('record-display');
     this.crtOverlay = document.getElementById('crt-overlay');
     this.btnSound = document.getElementById('btn-sound');
     this.btnCrt = document.getElementById('btn-crt');
@@ -19,11 +21,21 @@ export class HUD {
     this.initControls();
   }
 
+  // Troca ícone + texto preservando os spans (.btn-ico/.btn-txt) do botão.
+  setToggleLabel(btn, icon, text) {
+    if (!btn) return;
+    const ico = btn.querySelector('.btn-ico');
+    const txt = btn.querySelector('.btn-txt');
+    if (ico) ico.textContent = icon;
+    if (txt) txt.textContent = ` ${text}`;
+    if (!ico && !txt) btn.textContent = `${icon} ${text}`;
+  }
+
   initControls() {
     if (this.btnSound) {
       this.btnSound.addEventListener('click', () => {
-        const enabled = audio.toggle();
-        this.btnSound.textContent = enabled ? '🔊 SOM: LIGADO' : '🔇 SOM: DESLIGADO';
+        audio.toggle();
+        this.refreshOptionsLabels();
       });
     }
 
@@ -32,12 +44,20 @@ export class HUD {
         this.crtEnabled = !this.crtEnabled;
         if (this.crtEnabled) {
           this.crtOverlay.classList.remove('crt-off');
-          this.btnCrt.textContent = '📺 CRT: ON';
         } else {
           this.crtOverlay.classList.add('crt-off');
-          this.btnCrt.textContent = '📺 CRT: OFF';
         }
+        this.refreshOptionsLabels();
       });
+    }
+  }
+
+  // Reaplica os rótulos dos toggles no idioma atual (ex.: após trocar PT/EN)
+  refreshOptionsLabels(player = null) {
+    this.setToggleLabel(this.btnSound, audio.enabled ? '🔊' : '🔇', t(audio.enabled ? 'opt.soundOn' : 'opt.soundOff'));
+    this.setToggleLabel(this.btnCrt, '📺', t(this.crtEnabled ? 'opt.crtOn' : 'opt.crtOff'));
+    if (player && typeof player.refreshTouchLabel === 'function') {
+      player.refreshTouchLabel();
     }
   }
 
@@ -73,11 +93,22 @@ export class HUD {
       this.treasuresEl.textContent = `${player.treasuresCollected}`;
     }
 
+    // 5b. Recorde (acima do contador de gemas)
+    if (this.recordEl) {
+      this.recordEl.textContent = String(getHighScore()).padStart(6, '0');
+    }
+
     if (player.isTripped && this.crocPromptEl) {
       this.crocPromptEl.className = 'hud-box croc-status danger';
       if (this.crocTextEl) {
-        this.crocTextEl.textContent = '💥 VOCÊ CAIU DE CARA! PRESSIONE W/↑ OU S/↓ PARA LEVANTAR';
+        this.crocTextEl.textContent = t('hint.tripped');
       }
+      return;
+    }
+
+    // Mensagens de ajuda contextuais (ocultáveis na opção AJUDA NA TELA)
+    if (!getShowHelp()) {
+      if (this.crocPromptEl) this.crocPromptEl.className = 'hud-box croc-status';
       return;
     }
 
@@ -104,25 +135,25 @@ export class HUD {
             // ON THE EYES! 100% SAFE - THE CLASSIC ATARI STRATEGY!
             this.crocPromptEl.className = 'hud-box croc-status eye-safe';
             if (this.crocTextEl) {
-              this.crocTextEl.textContent = '👁️ SOBRE OS OLHOS: 100% SEGURO! (A BOCA NÃO TE PEGA)';
+              this.crocTextEl.textContent = t('hint.eyeSafe');
             }
           } else {
             // ON THE SNOUT
             this.crocPromptEl.className = 'hud-box croc-status safe';
             if (this.crocTextEl) {
-              this.crocTextEl.textContent = '🐊 NO FOCINHO: AVANCE PARA OS OLHOS PARA FICAR SEGURO!';
+              this.crocTextEl.textContent = t('hint.snout');
             }
           }
         } else {
           if (nearestCroc.isOpen) {
             this.crocPromptEl.className = 'hud-box croc-status danger';
             if (this.crocTextEl) {
-              this.crocTextEl.textContent = '⚠️ BOCA ABERTA: NÃO PISE NO FOCINHO! PULE DIRETO NOS OLHOS!';
+              this.crocTextEl.textContent = t('hint.mouthOpen');
             }
           } else {
             this.crocPromptEl.className = 'hud-box croc-status safe';
             if (this.crocTextEl) {
-              this.crocTextEl.textContent = '🐊 BOCA FECHADA! PULE NOS OLHOS OU NA CABEÇA!';
+              this.crocTextEl.textContent = t('hint.mouthClosed');
             }
           }
         }
@@ -142,22 +173,22 @@ export class HUD {
           if (nearestPit.phase === 'closing') {
             this.crocPromptEl.className = 'hud-box croc-status safe';
             if (this.crocTextEl) {
-              this.crocTextEl.textContent = '🤐 ZÍPER FECHANDO: AVANCE COM A ONDA!';
+              this.crocTextEl.textContent = t('hint.zipClosing');
             }
           } else if (nearestPit.phase === 'opening') {
             this.crocPromptEl.className = 'hud-box croc-status danger';
             if (this.crocTextEl) {
-              this.crocTextEl.textContent = '⚠️ AREIA ABRINDO EM ONDA! AGUARDE FECHAR!';
+              this.crocTextEl.textContent = t('hint.zipOpening');
             }
           } else if (nearestPit.isOpen) {
             this.crocPromptEl.className = 'hud-box croc-status danger';
             if (this.crocTextEl) {
-              this.crocTextEl.textContent = '⚠️ AREIA MOVEDIÇA ABERTA! LONGA DEMAIS PARA PULAR - AGUARDE!';
+              this.crocTextEl.textContent = t('hint.zipOpen');
             }
           } else {
             this.crocPromptEl.className = 'hud-box croc-status safe';
             if (this.crocTextEl) {
-              this.crocTextEl.textContent = '⏳ AREIA MOVEDIÇA FECHADA: CORRA AGORA!';
+              this.crocTextEl.textContent = t('hint.zipClosed');
             }
           }
         } else {
@@ -179,7 +210,7 @@ export class HUD {
         if (nearestScorpion && minScorpionDist < 14) {
           this.crocPromptEl.className = 'hud-box croc-status danger';
           if (this.crocTextEl) {
-            this.crocTextEl.textContent = '🦂 ESCORPIÃO VENENOSO À FRENTE! PULE PARA SUPERAR!';
+            this.crocTextEl.textContent = t('hint.scorpion');
           }
         } else {
           this.crocPromptEl.className = 'hud-box croc-status';

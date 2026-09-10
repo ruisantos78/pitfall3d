@@ -2,7 +2,11 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>ATARI PITFALL 3D - Primeira Pessoa (FPS)</title>
     <!-- Retro Atari font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,101 +26,130 @@
       <div id="hud">
         <div class="hud-top-row">
           <div class="hud-box score-box">
-            <span class="hud-label">PONTOS</span>
+            <span class="hud-label" data-i18n="hud.score">PONTOS</span>
             <span id="score-display" class="hud-val">002000</span>
           </div>
 
           <div class="hud-box timer-box">
-            <span class="hud-label">TEMPO</span>
+            <span class="hud-label" data-i18n="hud.time">TEMPO</span>
             <span id="timer-display" class="hud-val">20:00</span>
           </div>
 
           <div class="hud-box lives-box">
-            <span class="hud-label">VIDAS</span>
+            <span class="hud-label" data-i18n="hud.lives">VIDAS</span>
             <div id="lives-display" class="lives-icons">
               <span class="life-icon">▲</span>
               <span class="life-icon">▲</span>
               <span class="life-icon">▲</span>
             </div>
           </div>
+
+          <div class="hud-box record-box">
+            <span class="hud-label" data-i18n="hud.highScore">🏆 RECORDE</span>
+            <span id="record-display" class="hud-val">000000</span>
+          </div>
         </div>
 
         <div class="hud-bottom-row">
           <div class="hud-box screen-box">
-            <span class="hud-label">TELA</span>
+            <span class="hud-label" data-i18n="hud.screen">TELA</span>
             <span id="screen-display" class="hud-val">001</span>
           </div>
 
           <div class="hud-box vine-status" id="vine-prompt">
-            <span class="blink">AGARRADO AO CIPO! [ESPAÇO] PARA SOLTAR</span>
+            <span class="blink" data-i18n="vine.grabbed">AGARRADO AO CIPO! [ESPAÇO] PARA SOLTAR</span>
           </div>
 
           <div class="hud-box croc-status" id="croc-prompt">
-            <span id="croc-status-text">🐊 BOCA FECHADA: SEGURO PISAR!</span>
+            <span id="croc-status-text" data-i18n="hint.mouthClosed">🐊 BOCA FECHADA! PULE NOS OLHOS OU NA CABEÇA!</span>
           </div>
 
           <div class="hud-box treasures-box">
-            <span class="hud-label">TESOUROS</span>
+            <span class="hud-label" data-i18n="hud.treasures">TESOUROS</span>
             <span id="treasure-display" class="hud-val">0</span>
           </div>
         </div>
       </div>
 
-
-      <!-- Audio / CRT Toggles -->
-      <div id="top-controls">
-        <button id="btn-sound" class="retro-btn" title="Alternar Som">🔊 SOM: LIGADO</button>
-        <button id="btn-crt" class="retro-btn" title="Alternar Filtro CRT">📺 CRT: ON</button>
-        <button id="btn-touch-toggle" class="retro-btn" title="Mostrar ou ocultar controles touch">📱 TOUCH: ON</button>
-      </div>
-
       <!-- Start / Instructions Overlay -->
       <div id="start-overlay" class="overlay">
         <div class="retro-card">
-          <h1 class="game-title">PITFALL! 3D</h1>
-          <h2 class="game-subtitle">EDIÇÃO EM PRIMEIRA PESSOA (VOXEL RETRO)</h2>
+          <!-- Vista principal do menu -->
+          <div id="menu-main" class="menu-view">
+            <h1 class="game-title">PITFALL! 3D</h1>
+            <h2 class="game-subtitle" data-i18n="menu.subtitle">EDIÇÃO EM PRIMEIRA PESSOA (VOXEL RETRO)</h2>
 
-          <div class="instructions-box">
-            <p class="rule-highlight">★ CONTROLES ORIGINAIS DO ATARI 2600 ★</p>
-            <ul>
-              <li><strong>[↑] / [↓] touch:</strong> Andar para FRENTE / TRÁS</li>
-              <li><strong>[ESPAÇO] / botão circular:</strong> PULAR ou SOLTAR O CIPÓ</li>
-            </ul>
-            <div class="mechanics-guide">
-              <p>🌿 <strong>CIPÓ:</strong> Agarrado <em>automaticamente</em> ao tocar! Pressione <strong>[ESPAÇO]</strong> para soltar e cruzar abismos e crocodilos!</p>
-              <p>🐊 <strong>CROCODILOS:</strong> Só pise em suas cabeças quando a boca estiver FECHADA!</p>
-              <p>🪵 <strong>TRONCOS:</strong> Pule sobre eles para não tropeçar; se cair de cara, pressione uma direção novamente para levantar!</p>
-              <p>💎 <strong>TESOUROS:</strong> Colete barras de ouro, prata, diamantes e sacos de dinheiro!</p>
-              <p>⏳ Você tem <strong>20 minutos</strong> para explorar a selva e pontuar o máximo!</p>
+            <div class="instructions-box">
+              <p class="rule-highlight" data-i18n="menu.rulesTitle">★ CONTROLES ORIGINAIS DO ATARI 2600 ★</p>
+              <ul>
+                <li><strong data-i18n="menu.moveKeys">[↑] / [↓] touch:</strong> <span data-i18n="menu.moveVal">Andar para FRENTE / TRÁS</span></li>
+                <li><strong data-i18n="menu.actionKeys">[ESPAÇO] / botão circular:</strong> <span data-i18n="menu.actionVal">PULAR ou SOLTAR O CIPÓ</span></li>
+              </ul>
+              <div class="mechanics-guide">
+                <p>🌿 <strong data-i18n="menu.vineK">CIPÓ:</strong> <span data-i18n="menu.vineV">Agarrado automaticamente ao tocar! Pressione [ESPAÇO] para soltar e cruzar abismos e crocodilos!</span></p>
+                <p>🐊 <strong data-i18n="menu.crocK">CROCODILOS:</strong> <span data-i18n="menu.crocV">Só pise em suas cabeças quando a boca estiver FECHADA!</span></p>
+                <p>🪵 <strong data-i18n="menu.logsK">TRONCOS:</strong> <span data-i18n="menu.logsV">Pule sobre eles para não tropeçar; se cair de cara, pressione uma direção novamente para levantar!</span></p>
+                <p>💎 <strong data-i18n="menu.treasuresK">TESOUROS:</strong> <span data-i18n="menu.treasuresV">Colete barras de ouro, prata, diamantes e sacos de dinheiro!</span></p>
+                <p>⏳ <span data-i18n="menu.time">Você tem 20 minutos para explorar a selva e pontuar o máximo!</span></p>
+              </div>
             </div>
+
+            <div class="menu-buttons">
+              <button id="start-btn" class="retro-btn-large" data-i18n="menu.start">▶ INICIAR EXPEDIÇÃO</button>
+              <button id="options-btn" class="retro-btn-large options-btn" data-i18n="menu.options">⚙ OPÇÕES</button>
+            </div>
+
+            <p class="highscore-line">🏆 <span data-i18n="menu.highScore">RECORDE:</span> <span id="highscore-display">000000</span></p>
           </div>
 
-          <button id="start-btn" class="retro-btn-large">▶ INICIAR EXPEDIÇÃO</button>
+          <!-- Vista do menu de opções -->
+          <div id="menu-options" class="menu-view hidden">
+            <h1 class="game-title" data-i18n="menu.optionsTitle">OPÇÕES</h1>
+            <div id="options-menu">
+              <div class="options-group">
+                <p class="options-label" data-i18n="opt.language">IDIOMA / LANGUAGE</p>
+                <div class="lang-row">
+                  <button id="btn-lang-pt" class="retro-btn lang-btn" type="button">🇧🇷 PT</button>
+                  <button id="btn-lang-en" class="retro-btn lang-btn" type="button">🇺🇸 EN</button>
+                </div>
+              </div>
+              <button id="btn-help" class="retro-btn" data-i18n-title="opt.helpTitle" title="Exibir ou ocultar mensagens de ajuda"><span class="btn-ico">💡</span><span class="btn-txt"> AJUDA NA TELA: LIGADA</span></button>
+              <button id="btn-sound" class="retro-btn" data-i18n-title="opt.soundTitle" title="Alternar Som"><span class="btn-ico">🔊</span><span class="btn-txt"> SOM: LIGADO</span></button>
+              <button id="btn-crt" class="retro-btn" data-i18n-title="opt.crtTitle" title="Alternar Filtro CRT"><span class="btn-ico">📺</span><span class="btn-txt"> CRT: ON</span></button>
+              <button id="btn-touch-toggle" class="retro-btn" data-i18n-title="opt.touchTitle" title="Mostrar ou ocultar controles touch"><span class="btn-ico">📱</span><span class="btn-txt"> TOUCH: ON</span></button>
+            </div>
+            <button id="options-back-btn" class="retro-btn-large" data-i18n="menu.back">◀ VOLTAR</button>
+          </div>
         </div>
       </div>
 
       <!-- Game Over Overlay -->
       <div id="gameover-overlay" class="overlay hidden">
         <div class="retro-card">
-          <h1 class="game-title death-title">FIM DE JOGO</h1>
-          <p id="gameover-reason" class="gameover-text">Você perdeu todas as vidas na selva!</p>
+          <h1 class="game-title death-title" data-i18n="over.title">FIM DE JOGO</h1>
+          <p id="gameover-reason" class="gameover-text" data-i18n="over.defaultReason">Você perdeu todas as vidas na selva!</p>
+          <p id="new-record" class="new-record hidden" data-i18n="over.newRecord">★ NOVO RECORDE! ★</p>
           <div class="stats-summary">
-            <p>PONTUAÇÃO FINAL: <span id="final-score">000000</span></p>
-            <p>TELAS PERCORRIDAS: <span id="final-screens">0</span></p>
-            <p>TESOUROS RESGATADOS: <span id="final-treasures">0</span></p>
+            <p><span data-i18n="over.score">PONTUAÇÃO FINAL:</span> <span id="final-score">000000</span></p>
+            <p><span data-i18n="over.screens">TELAS PERCORRIDAS:</span> <span id="final-screens">0</span></p>
+            <p><span data-i18n="over.treasures">TESOUROS RESGATADOS:</span> <span id="final-treasures">0</span></p>
+            <p>🏆 <span data-i18n="over.highScore">RECORDE:</span> <span id="final-highscore">000000</span></p>
           </div>
-          <button id="restart-btn" class="retro-btn-large">🔄 TENTAR NOVAMENTE</button>
+          <div class="menu-buttons">
+            <button id="restart-btn" class="retro-btn-large" data-i18n="over.retry">🔄 TENTAR NOVAMENTE</button>
+            <button id="menu-btn" class="retro-btn-large options-btn" data-i18n="over.menu">🏠 MENU INICIAL</button>
+          </div>
         </div>
       </div>
 
       <!-- Mobile Touch Controls -->
       <div id="mobile-controls">
         <div class="mobile-stick-col">
-          <button id="btn-forward" class="touch-btn direction-touch-btn" aria-label="Andar para frente">▲</button>
-          <button id="btn-backward" class="touch-btn direction-touch-btn" aria-label="Andar para trás">▼</button>
+          <button id="btn-forward" class="touch-btn direction-touch-btn" data-i18n-aria="touch.fwd" aria-label="Andar para frente">▲</button>
+          <button id="btn-backward" class="touch-btn direction-touch-btn" data-i18n-aria="touch.bwd" aria-label="Andar para trás">▼</button>
         </div>
         <div class="mobile-action-col">
-          <button id="btn-action" class="touch-btn action-touch-btn" aria-label="Pular ou soltar o cipó">●</button>
+          <button id="btn-action" class="touch-btn action-touch-btn" data-i18n-aria="touch.act" aria-label="Pular ou soltar o cipó">●</button>
         </div>
       </div>
     </div>
