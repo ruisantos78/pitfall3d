@@ -67,6 +67,7 @@
       <div id="top-controls">
         <button id="btn-sound" class="retro-btn" title="Alternar Som">🔊 SOM: LIGADO</button>
         <button id="btn-crt" class="retro-btn" title="Alternar Filtro CRT">📺 CRT: ON</button>
+        <button id="btn-touch-toggle" class="retro-btn" title="Mostrar ou ocultar controles touch">📱 TOUCH: ON</button>
       </div>
 
       <!-- Start / Instructions Overlay -->
@@ -78,14 +79,13 @@
           <div class="instructions-box">
             <p class="rule-highlight">★ CONTROLES ORIGINAIS DO ATARI 2600 ★</p>
             <ul>
-              <li><strong>[W] ou [↑] ou [Arrastar Cima]:</strong> Andar para FRENTE</li>
-              <li><strong>[S] ou [↓] ou [Arrastar Baixo]:</strong> Andar para TRÁS</li>
-              <li><strong>[ESPAÇO] / [CLIQUE]:</strong> PULAR ou SOLTAR O CIPÓ</li>
+              <li><strong>[↑] / [↓] touch:</strong> Andar para FRENTE / TRÁS</li>
+              <li><strong>[ESPAÇO] / botão circular:</strong> PULAR ou SOLTAR O CIPÓ</li>
             </ul>
             <div class="mechanics-guide">
               <p>🌿 <strong>CIPÓ:</strong> Agarrado <em>automaticamente</em> ao tocar! Pressione <strong>[ESPAÇO]</strong> para soltar e cruzar abismos e crocodilos!</p>
               <p>🐊 <strong>CROCODILOS:</strong> Só pise em suas cabeças quando a boca estiver FECHADA!</p>
-              <p>🪵 <strong>TRONCOS:</strong> Pule sobre eles para não tropeçar e perder pontos!</p>
+              <p>🪵 <strong>TRONCOS:</strong> Pule sobre eles para não tropeçar; se cair de cara, pressione uma direção novamente para levantar!</p>
               <p>💎 <strong>TESOUROS:</strong> Colete barras de ouro, prata, diamantes e sacos de dinheiro!</p>
               <p>⏳ Você tem <strong>20 minutos</strong> para explorar a selva e pontuar o máximo!</p>
             </div>
@@ -112,11 +112,11 @@
       <!-- Mobile Touch Controls -->
       <div id="mobile-controls">
         <div class="mobile-stick-col">
-          <button id="btn-forward" class="touch-btn">▲<br>FRENTE</button>
-          <button id="btn-backward" class="touch-btn">▼<br>TRÁS</button>
+          <button id="btn-forward" class="touch-btn direction-touch-btn" aria-label="Andar para frente">▲</button>
+          <button id="btn-backward" class="touch-btn direction-touch-btn" aria-label="Andar para trás">▼</button>
         </div>
         <div class="mobile-action-col">
-          <button id="btn-action" class="touch-btn action-touch-btn">PULAR /<br>SOLTAR</button>
+          <button id="btn-action" class="touch-btn action-touch-btn" aria-label="Pular ou soltar o cipó">●</button>
         </div>
       </div>
     </div>

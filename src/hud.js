@@ -73,6 +73,14 @@ export class HUD {
       this.treasuresEl.textContent = `${player.treasuresCollected}`;
     }
 
+    if (player.isTripped && this.crocPromptEl) {
+      this.crocPromptEl.className = 'hud-box croc-status danger';
+      if (this.crocTextEl) {
+        this.crocTextEl.textContent = '💥 VOCÊ CAIU DE CARA! PRESSIONE W/↑ OU S/↓ PARA LEVANTAR';
+      }
+      return;
+    }
+
     // 6. Crocodile Danger / Safe Indicator
     if (this.crocPromptEl && world && world.activeCrocodiles) {
       let nearestCroc = null;

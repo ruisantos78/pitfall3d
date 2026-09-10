@@ -768,19 +768,12 @@ export function createPlayerArmsModel() {
 export function createOpeningQuicksandModel(voxelSize = 0.45) {
   const group = new THREE.Group();
 
-  // 1. Fixed Pit: Earthen Pit Walls & Bubbling Mud Floor (9.0m long along Z)
+  // 1. Fixed Pit: paredes do poço (do chão para baixo).
+  // Sem fundo de lama: o fundo é o poço negro sem fim adicionado em world.js
+  // (addBottomlessShaft). Acima do chão nada muda.
   const pitVoxels = [];
-  const mudColors = ['#38240e', '#4a3214', '#5c3e1c', '#2c1808'];
 
-  // Mud floor at Y = -2 (deep below ground level)
-  for (let z = -10; z <= 10; z++) {
-    for (let x = -4; x <= 4; x++) {
-      const col = mudColors[(Math.abs(x * 3 + z * 7)) % mudColors.length];
-      pitVoxels.push({ x, y: -2, z, color: col });
-    }
-  }
-
-  // Vertical Pit Walls (from Y = -2 up to Y = 0)
+  // Paredes verticais do poço (de Y = -2 até Y = 0, como antes)
   for (let y = -2; y <= 0; y++) {
     for (let x = -4; x <= 4; x++) {
       pitVoxels.push({ x, y, z: -10, color: '#382010' });

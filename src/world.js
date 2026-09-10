@@ -40,6 +40,26 @@ export class World {
 
     // Shared tree template for cloning
     this.treeTemplate = createTreeModel(0.5);
+
+    // Poço sem fim: material preto visto por dentro (paredes do abismo)
+    this.abyssMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide });
+  }
+
+  // Poço sem fim: tubo preto profundo sem tampa para parecer abismo infinito
+  addBottomlessShaft(group, centerZ, length, width = PATH_WIDTH) {
+    const depth = 40;
+    const shaftGeo = new THREE.BoxGeometry(width, depth, length);
+    const shaft = new THREE.Mesh(shaftGeo, this.abyssMaterial);
+    // Topo aberto logo abaixo do solo (y=-0.5), fundo a -40
+    shaft.position.set(0, -0.5 - depth / 2, centerZ);
+    group.add(shaft);
+    // Fundo preto absoluto para não ver o céu/fog lá embaixo
+    const bottomGeo = new THREE.PlaneGeometry(width, length);
+    const bottomMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const bottom = new THREE.Mesh(bottomGeo, bottomMat);
+    bottom.rotation.x = -Math.PI / 2;
+    bottom.position.set(0, -0.5 - depth, centerZ);
+    group.add(bottom);
   }
 
   // Generate or get screen at index (0, 1, 2, ...)
@@ -163,6 +183,8 @@ export class World {
     const midZ = (startZ + endZ) / 2;
     const hasDisappearingPit = ['DISAPPEARING_QUICKSAND', 'QUICKSAND_AND_LOG'].includes(screenType);
     const pitCenterZ = screenType === 'QUICKSAND_AND_LOG' ? midZ + 6 : midZ;
+    const hasLogExitPit = ['ROLLING_LOGS', 'QUICKSAND_AND_LOG', 'TRIPLE_LOGS'].includes(screenType);
+    const logExitPitCenterZ = startZ - 2.5;
 
     const groundVoxels = [];
     const grassColor = '#306c24';
@@ -180,7 +202,7 @@ export class World {
         for (let x = -4; x <= 4; x++) {
           const isEdge = Math.abs(x) >= 3;
           // Leave opening on path for disappearing pit model
-          if (isOverDisappearingPit && !isEdge) continue;
+          if ((isOverDisappearingPit || (hasLogExitPit && Math.abs(worldZ - logExitPitCenterZ) <= 2.5)) && !isEdge) continue;
 
           let col = isEdge ? ((x + z) % 2 === 0 ? grassBorderColor : grassColor) : (((x + z) % 3 === 0) ? pathShade : pathColor);
           groundVoxels.push({ x, y: 0, z: -z, color: col });
@@ -210,6 +232,10 @@ export class World {
   }
 
   buildScreenFeatures(group, index, startZ, endZ, midZ, type) {
+    if (['ROLLING_LOGS', 'QUICKSAND_AND_LOG', 'TRIPLE_LOGS'].includes(type)) {
+      this.addLogExitPit(group, index, startZ);
+    }
+
     switch (type) {
       case 'START_TRAIL':
         // Safe starting area with one stationary log to learn jumping
@@ -322,16 +348,39 @@ export class World {
 
   addRollingLog(group, screenIndex, z, startZ, endZ) {
     const log = createLogModel(0.18);
-    log.position.set(0, 0.45, z);
+    // Tronco cai do céu: nasce lá no alto para o jogador ver chegando
+    const spawnY = 10 + Math.random() * 3;
+    log.position.set(0, spawnY, z);
     group.add(log);
+
+    // Sombra de aviso no chão: cresce enquanto o tronco se aproxima do pouso.
+    const shadowMaterial = new THREE.MeshBasicMaterial({
+      color: 0x130d08,
+      transparent: true,
+      opacity: 0.12,
+      depthWrite: false,
+    });
+    const landingShadow = new THREE.Mesh(new THREE.CircleGeometry(1, 16), shadowMaterial);
+    landingShadow.rotation.x = -Math.PI / 2;
+    landingShadow.position.set(0, 0.015, z);
+    landingShadow.scale.set(0.16, 0.16, 0.16);
+    group.add(landingShadow);
 
     const logData = {
       type: 'rolling_log',
       screenIndex,
       mesh: log,
+      landingShadow,
       z: z,
+      y: spawnY,
+      vy: 0,
+      falling: true,
+      fallingIntoPit: false,
+      groundY: 0.45,
+      maxFallHeight: spawnY - 0.45,
       startZ,
       endZ,
+      exitPitZ: startZ,
       speed: 6.5, // units/sec towards player (+Z direction)
       radius: 1.2,
     };
@@ -340,11 +389,31 @@ export class World {
     this.activeHazards.push(logData);
   }
 
+  addLogExitPit(group, screenIndex, startZ, length = 5) {
+    const centerZ = startZ - length / 2;
+    const pitWidth = PATH_WIDTH - 2;
+    const pitGeo = new THREE.BoxGeometry(pitWidth, 0.2, length);
+    const pitMesh = new THREE.Mesh(pitGeo, this.pitMaterial);
+    pitMesh.position.set(0, -0.6, centerZ);
+    group.add(pitMesh);
+    this.addBottomlessShaft(group, centerZ, length, pitWidth);
+
+    this.activeHazards.push({
+      type: 'log_exit_pit',
+      screenIndex,
+      minZ: startZ - length,
+      maxZ: startZ,
+      centerZ,
+    });
+  }
+
   addQuicksandPit(group, screenIndex, centerZ, length = 20) {
     const pitGeo = new THREE.BoxGeometry(PATH_WIDTH, 0.2, length);
     const pitMesh = new THREE.Mesh(pitGeo, this.quicksandMaterial);
     pitMesh.position.set(0, -0.6, centerZ);
     group.add(pitMesh);
+    // Abismo negro sem fim abaixo da superfície
+    this.addBottomlessShaft(group, centerZ, length);
 
     this.activeHazards.push({
       type: 'quicksand',
@@ -360,6 +429,8 @@ export class World {
     const pitMesh = new THREE.Mesh(pitGeo, this.pitMaterial);
     pitMesh.position.set(0, -0.6, centerZ);
     group.add(pitMesh);
+    // Abismo negro sem fim abaixo da superfície
+    this.addBottomlessShaft(group, centerZ, length);
 
     this.activeHazards.push({
       type: 'tarpit',
@@ -374,6 +445,8 @@ export class World {
     const pit = createOpeningQuicksandModel(0.45);
     pit.group.position.set(0, -0.45, z);
     group.add(pit.group);
+    // Abismo negro sem fim (9.0m de extensão) abaixo do tampão móvel
+    this.addBottomlessShaft(group, z, 9.2);
 
     const pitData = {
       type: 'disappearing_quicksand',
@@ -396,6 +469,8 @@ export class World {
     const waterMesh = new THREE.Mesh(waterGeo, this.waterMaterial);
     waterMesh.position.set(0, -0.6, centerZ);
     group.add(waterMesh);
+    // Abismo negro sem fim abaixo do lago
+    this.addBottomlessShaft(group, centerZ, length);
 
     this.activeHazards.push({
       type: 'water',
@@ -543,14 +618,62 @@ export class World {
 
     // 3. Update Rolling Logs
     this.activeRollingLogs.forEach(l => {
-      // Moves towards player (+Z direction)
-      l.z += l.speed * delta;
-      l.mesh.position.z = l.z;
-      l.mesh.rotation.x += delta * 12; // rolling animation
+      // Queda do céu antes de rolar: gravidade até o solo
+      if (l.falling) {
+        l.vy -= 30 * delta;
+        l.y += l.vy * delta;
+        const fallProgress = THREE.MathUtils.clamp(
+          1 - (l.y - l.groundY) / l.maxFallHeight,
+          0,
+          1,
+        );
+        const shadowScale = 0.16 + fallProgress * 0.95;
+        l.landingShadow.visible = true;
+        l.landingShadow.position.z = l.z;
+        l.landingShadow.scale.set(shadowScale, shadowScale, shadowScale);
+        l.landingShadow.material.opacity = 0.1 + fallProgress * 0.28;
+        if (l.y <= l.groundY) {
+          l.y = l.groundY;
+          l.vy = 0;
+          l.falling = false;
+          l.landingShadow.visible = false;
+        }
+        l.mesh.position.y = l.y;
+        l.mesh.rotation.x += delta * 3; // giro suave durante a queda
+      } else if (l.fallingIntoPit) {
+        // O tronco chega à abertura no fim da tela e cai no buraco.
+        l.vy -= 30 * delta;
+        l.y += l.vy * delta;
+        l.z = l.exitPitZ;
+        l.mesh.position.y = l.y;
+        l.mesh.position.z = l.z;
+        l.mesh.rotation.x += delta * 10;
 
-      // Reset to end of screen if it rolls too far past start
-      if (l.z > l.startZ + 5) {
-        l.z = l.endZ;
+        if (l.y <= -12) {
+          l.z = l.endZ - Math.random() * 4;
+          l.y = 10 + Math.random() * 4;
+          l.vy = 0;
+          l.falling = true;
+          l.fallingIntoPit = false;
+          l.landingShadow.visible = true;
+          l.mesh.position.z = l.z;
+          l.mesh.position.y = l.y;
+        }
+      } else {
+        l.mesh.position.y = l.groundY;
+        l.mesh.rotation.x += delta * 12; // rolling animation
+        // Moves towards player (+Z direction) — só rola após tocar o solo
+        l.z += l.speed * delta;
+        l.mesh.position.z = l.z;
+
+        // Ao sair da tela, cai na abertura em vez de reaparecer instantaneamente.
+        if (l.z >= l.exitPitZ) {
+          l.z = l.exitPitZ;
+          l.y = l.groundY;
+          l.vy = 0;
+          l.fallingIntoPit = true;
+          l.landingShadow.visible = false;
+        }
       }
     });
 

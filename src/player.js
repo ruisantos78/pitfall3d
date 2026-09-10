@@ -1,6 +1,7 @@
 // Player Controller - 1st Person Perspective (FPS) for Atari Pitfall 3D
 import * as THREE from 'three';
 import { audio } from './audio.js';
+import { SCREEN_LENGTH } from './world.js';
 import { createPlayerArmsModel } from './models.js';
 
 export const GRAVITY = 28.0;
@@ -39,6 +40,11 @@ export class Player {
     this.isDying = false;
     this.deathTimer = 0;
     this.tripCooldown = 0;
+    this.isTripped = false; // Caiu de cara no chão e aguarda uma nova direção
+    // O topo do chão é Y=0. A câmera e os braços precisam permanecer acima dele.
+    this.PRONE_EYE_HEIGHT = 0.65;
+    this.TRIP_STAND_DELAY = 0.25;
+    this.tripStandTimer = 0;
 
     // Head bobbing & arms
     this.bobTimer = 0;
@@ -59,8 +65,10 @@ export class Player {
       audio.init();
 
       if (e.code === 'KeyW' || e.code === 'ArrowUp') {
+        if (this.touchOnly) return;
         this.moveForward = true;
       } else if (e.code === 'KeyS' || e.code === 'ArrowDown') {
+        if (this.touchOnly) return;
         this.moveBackward = true;
       } else if (e.code === 'Space' || e.code === 'Enter') {
         if (!this.actionPressed) {
@@ -80,45 +88,64 @@ export class Player {
       }
     });
 
-    // Mouse click as single action button (Jump / Release Vine)
-    window.addEventListener('pointerdown', (e) => {
-      if (this.isGameOver) return;
-      // If clicking HUD buttons, don't trigger jump
-      if (e.target.closest('button') || e.target.closest('#hud')) return;
-      audio.init();
-      this.actionJustPressed = true;
-      this.actionPressed = true;
-    });
-
-    window.addEventListener('pointerup', () => {
-      this.actionPressed = false;
-    });
-
-    // Touch controls setup
+    // O mouse não é um botão de ação. Pulo e soltura do cipó usam apenas
+    // Espaço/Enter ou o botão circular touch.
     const btnFwd = document.getElementById('btn-forward');
     const btnBwd = document.getElementById('btn-backward');
     const btnAct = document.getElementById('btn-action');
+    const btnTouchToggle = document.getElementById('btn-touch-toggle');
+    const touchControls = document.getElementById('mobile-controls');
+    this.touchOnly = false;
 
-    if (btnFwd) {
-      btnFwd.addEventListener('pointerdown', (e) => { e.preventDefault(); this.moveForward = true; });
-      btnFwd.addEventListener('pointerup', (e) => { e.preventDefault(); this.moveForward = false; });
-      btnFwd.addEventListener('pointerleave', () => { this.moveForward = false; });
+    const mobileBrowser = navigator.userAgentData?.mobile === true
+      || /Android|iPhone|iPad|iPod|Windows Phone|webOS|BlackBerry|Opera Mini/i.test(navigator.userAgent)
+      || (navigator.maxTouchPoints > 0 && window.matchMedia('(pointer: coarse)').matches);
+
+    if (touchControls && mobileBrowser) {
+      touchControls.classList.add('touch-visible');
+      this.touchOnly = true;
     }
-    if (btnBwd) {
-      btnBwd.addEventListener('pointerdown', (e) => { e.preventDefault(); this.moveBackward = true; });
-      btnBwd.addEventListener('pointerup', (e) => { e.preventDefault(); this.moveBackward = false; });
-      btnBwd.addEventListener('pointerleave', () => { this.moveBackward = false; });
+
+    if (btnTouchToggle && touchControls) {
+      btnTouchToggle.textContent = this.touchOnly ? '📱 TOUCH: ON' : '📱 TOUCH: OFF';
+      btnTouchToggle.addEventListener('click', () => {
+        const isVisible = touchControls.classList.toggle('touch-visible');
+        touchControls.classList.toggle('touch-hidden', !isVisible);
+        this.touchOnly = isVisible;
+        btnTouchToggle.textContent = isVisible ? '📱 TOUCH: ON' : '📱 TOUCH: OFF';
+      });
     }
+
+    const bindDirectionButton = (button, direction) => {
+      if (!button) return;
+      const setPressed = (pressed, event) => {
+        event?.preventDefault();
+        this[direction] = pressed;
+      };
+      button.addEventListener('pointerdown', (e) => {
+        button.setPointerCapture?.(e.pointerId);
+        setPressed(true, e);
+      });
+      ['pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave'].forEach((eventName) => {
+        button.addEventListener(eventName, (e) => setPressed(false, e));
+      });
+    };
+
+    bindDirectionButton(btnFwd, 'moveForward');
+    bindDirectionButton(btnBwd, 'moveBackward');
     if (btnAct) {
       btnAct.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        btnAct.setPointerCapture?.(e.pointerId);
         audio.init();
         this.actionJustPressed = true;
         this.actionPressed = true;
       });
-      btnAct.addEventListener('pointerup', (e) => {
-        e.preventDefault();
-        this.actionPressed = false;
+      ['pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave'].forEach((eventName) => {
+        btnAct.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          this.actionPressed = false;
+        });
       });
     }
   }
@@ -132,7 +159,7 @@ export class Player {
       this.deathTimer -= delta;
       this.camera.position.y = Math.max(0.2, this.camera.position.y - delta * 2.5);
       if (this.deathTimer <= 0) {
-        this.respawn();
+        this.respawn(world);
       }
       return;
     }
@@ -157,6 +184,12 @@ export class Player {
 
     // State 2: NORMAL 1D MOVEMENT & JUMPING
     this.updateNormalMovement(delta, world);
+
+    // Enquanto está caído, não processa outros perigos nem coleta itens.
+    if (this.isTripped) {
+      this.updateArmsAndCamera(delta);
+      return;
+    }
 
     // Check if standing on an opening crocodile snout (NOT on the eyes!)
     if (this.isGrounded && Math.abs(this.y - 0.35) < 0.25) {
@@ -191,6 +224,33 @@ export class Player {
   }
 
   updateNormalMovement(delta, world) {
+    // Depois de tropeçar, fica de cara no chão até o jogador pressionar uma
+    // direção novamente. A própria direção que o levanta também retoma a marcha.
+    if (this.isTripped) {
+      this.vz = 0;
+      this.vy = 0;
+      this.actionJustPressed = false;
+
+      const standingSurfaceY = this.getSurfaceElevation(world, this.z);
+      if (standingSurfaceY > -5) {
+        this.y = standingSurfaceY;
+        this.isGrounded = true;
+      }
+
+      if (!this.moveForward && !this.moveBackward) {
+        this.tripStandTimer = 0;
+        return;
+      }
+
+      this.tripStandTimer += delta;
+      if (this.tripStandTimer < this.TRIP_STAND_DELAY) {
+        return;
+      }
+
+      this.isTripped = false;
+      this.tripStandTimer = 0;
+    }
+
     // Single axis: Forward (-Z) or Backward (+Z)
     let targetVz = 0;
     if (this.moveForward) targetVz -= RUN_SPEED;
@@ -302,6 +362,13 @@ export class Player {
       }
     }
 
+    // Pequeno poço no fim das telas de troncos: é preciso saltar por cima.
+    for (const hazard of world.activeHazards) {
+      if (hazard.type === 'log_exit_pit' && z >= hazard.minZ && z <= hazard.maxZ) {
+        return -10;
+      }
+    }
+
     // Normal solid ground
     return 0.0;
   }
@@ -396,15 +463,24 @@ export class Player {
     // 1. Logs (Stationary & Rolling)
     for (const hazard of world.activeHazards) {
       if (hazard.type === 'log' || hazard.type === 'rolling_log') {
+        // Tronco ainda caindo do céu não atropela
+        if (hazard.falling || hazard.fallingIntoPit) continue;
         const distZ = Math.abs(this.z - hazard.z);
         // If close and not jumping high enough
         if (distZ < 1.0 && this.y < 0.75) {
           if (this.tripCooldown <= 0) {
-            this.tripCooldown = 1.0;
+            this.tripCooldown = 0.6;
+            this.isTripped = true;
+            this.tripStandTimer = 0;
+            // Deixa Harry um pouco à frente do tronco para evitar uma nova
+            // colisão imediata quando ele se levanta.
+            this.z = hazard.z - 1.5;
             this.score = Math.max(0, this.score - 100);
             audio.playTrip();
-            // Stumble bump backward slightly
-            this.vz = 4.0;
+            // Para de andar e exige uma nova direção para levantar.
+            this.vz = 0;
+            this.moveForward = false;
+            this.moveBackward = false;
           }
         }
       } else if (hazard.type === 'fire') {
@@ -432,7 +508,8 @@ export class Player {
         const distZ = Math.abs(this.z - treasure.z);
         if (distZ < 1.4) {
           treasure.collected = true;
-          world.scene.remove(treasure.mesh);
+          // O tesouro pertence ao grupo da tela, não diretamente à cena.
+          treasure.mesh.removeFromParent();
           this.score += treasure.points;
           this.treasuresCollected++;
           audio.playTreasure();
@@ -444,6 +521,25 @@ export class Player {
   // Arms and First-Person Camera Motion
   updateArmsAndCamera(delta) {
     const isMoving = Math.abs(this.vz) > 0.5;
+    const isTripped = this.isTripped;
+
+    // Queda de cara: câmera rente ao chão, inclinada para baixo e sem head-bob.
+    if (isTripped) {
+      const targetY = this.y + this.PRONE_EYE_HEIGHT;
+      this.camera.position.set(0, THREE.MathUtils.lerp(this.camera.position.y, targetY, delta * 8), this.z);
+      // No Three.js, a rotação X negativa aponta a câmera para o chão.
+      this.camera.rotation.x = THREE.MathUtils.lerp(this.camera.rotation.x, -0.95, delta * 6);
+      this.camera.rotation.z = 0;
+      this.camera.rotation.y = 0;
+      if (this.arms) {
+        // Braços estendidos à frente, apoiados no chão.
+        this.arms.leftArm.position.set(-0.32, -0.18, -0.9);
+        this.arms.rightArm.position.set(0.32, -0.18, -0.9);
+        this.arms.leftArm.rotation.x = Math.PI / 2.2;
+        this.arms.rightArm.rotation.x = Math.PI / 2.2;
+      }
+      return;
+    }
 
     // Head bobbing calculation
     let bobY = 0;
@@ -463,8 +559,9 @@ export class Player {
     }
 
     // Camera position & rotation (slight natural tilt towards the trail ahead)
-    this.camera.position.set(0, this.y + EYE_HEIGHT + bobY, this.z);
-    this.camera.rotation.x = -0.04 + bobPitch;
+    const targetCameraY = this.y + EYE_HEIGHT + bobY;
+    this.camera.position.set(0, THREE.MathUtils.lerp(this.camera.position.y, targetCameraY, delta * 12), this.z);
+    this.camera.rotation.x = THREE.MathUtils.lerp(this.camera.rotation.x, -0.04 + bobPitch, delta * 12);
     this.camera.rotation.z = 0;
     this.camera.rotation.y = 0; // Strict forward orientation down corridor
 
@@ -519,15 +616,25 @@ export class Player {
     }
   }
 
-  respawn() {
+  respawn(world = null) {
     this.isDying = false;
     this.y = 0;
     this.vy = 0;
     this.vz = 0;
     this.isGrounded = true;
+    this.isTripped = false;
+    this.tripStandTimer = 0;
+    this.tripCooldown = 0;
 
-    // Safe respawn position: back up 8 units to safe ground
-    this.z += 8;
+    // Respawn no começo da tela onde morreu (frente = -Z, começo = borda +Z)
+    if (world) {
+      const screenIndex = Math.max(0, Math.floor(-this.z / SCREEN_LENGTH));
+      const screenStartZ = -screenIndex * SCREEN_LENGTH;
+      this.z = screenStartZ + 6;
+    } else {
+      // Fallback: recua 8 unidades
+      this.z += 8;
+    }
     this.camera.position.set(0, EYE_HEIGHT, this.z);
   }
 
@@ -560,6 +667,8 @@ export class Player {
     this.deathTimer = 0;
     this.attachedVine = null;
     this.tripCooldown = 0;
+    this.isTripped = false;
+    this.tripStandTimer = 0;
 
     const prompt = document.getElementById('vine-prompt');
     if (prompt) prompt.classList.remove('active');

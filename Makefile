@@ -1,7 +1,12 @@
-.PHONY: all run start dev install build preview deploy clean help
+.PHONY: all run start dev install build preview deploy publish clean help
 
 PORT ?= 5173
 HOST ?= 0.0.0.0
+REGISTRY ?= git.rscs.pt
+REGISTRY_USER ?= ruisantos
+IMAGE ?= $(REGISTRY)/ruisantos/pitfall
+TAG ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo latest)
+REGISTRY_TOKEN ?= $(GITEA_TOKEN)
 
 # Default target: launch the game
 all: run
@@ -38,6 +43,20 @@ preview:
 deploy:
 	@echo "🚀 Empacotando jogo em HTML único autônomo..."
 	npm run deploy
+
+## publish: Construir e publicar a imagem Docker no package registry do Gitea
+publish:
+	@echo "🔨 Construindo imagem $(IMAGE):$(TAG)..."
+	docker build --tag $(IMAGE):$(TAG) --tag $(IMAGE):latest .
+	@if [ -n "$(REGISTRY_TOKEN)" ]; then \
+		echo "🔐 Autenticando no registry $(REGISTRY)..."; \
+		printf '%s' "$(REGISTRY_TOKEN)" | docker login $(REGISTRY) --username "$(REGISTRY_USER)" --password-stdin; \
+	else \
+		echo "ℹ️ Usando as credenciais Docker já configuradas para $(REGISTRY)."; \
+	fi
+	docker push $(IMAGE):$(TAG)
+	docker push $(IMAGE):latest
+	@echo "✅ Publicado em https://git.rscs.pt/ruisantos/pitfall/packages"
 
 ## clean: Limpar a pasta de build (dist)
 clean:
