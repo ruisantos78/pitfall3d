@@ -1,53 +1,55 @@
-# 🕹️ ATARI PITFALL 3D - Edição em Primeira Pessoa (FPS)
+# 🕹️ ATARI PITFALL 3D - First-Person Edition (FPS)
 
-Uma recriação em **primeira pessoa (FPS)** do clássico atemporal **Pitfall!** do Atari 2600, construída em Three.js com estética retrô de cubos/voxels simulando pixels tridimensionais.
+**▶ Play online: https://ruisantos78.github.io/pitfall3d/**
 
----
-
-## 🎮 Controles & Mecânicas Originais
-
-Assim como no jogo original do Atari 2600:
-- **Movimento em Linha Reta (1D):** O jogador só se move para **FRENTE** ou para **TRÁS** ao longo do corredor da selva (sem strafe lateral).
-  - `[W]` ou `[Seta Cima]` ou botão touch: **Andar para Frente**
-  - `[S]` ou `[Seta Baixo]` ou botão touch: **Andar para Trás**
-- **Botão Único de Ação:**
-  - `[Espaço]`, `[Enter]` ou `[Clique do Mouse / Toque no botão]`:
-    - No chão: **PULA** sobre obstáculos (troncos, fogueiras, escorpiões).
-    - Agarrado ao cipó: **SOLTA O CIPÓ**, impulsionando Harry pelo ar com o momento do balanço para cruzar o abismo!
-- **Cipó Automático:** Ao saltar ou se aproximar do cipó balançando sobre areia movediça ou poço de crocodilos, Harry **agarra o cipó automaticamente**, reproduzindo o clássico grito estilo Tarzan em 8-bits!
-- **Corredor de Árvores:** Fileiras densas de árvores em cubos estilizadas nas laterais formam um corredor contínuo de selva com copa superior.
-- **Crocodilos:** Podem ser usados como apoio para atravessar lagoas, **mas apenas quando suas bocas estiverem fechadas**! Se a boca abrir, Harry é mordido!
-- **Troncos:** Troncos rolantes e estáticos. Tropeçar neles causa perda de pontos.
-- **Tesouros:** Barras de Ouro, Barras de Prata, Anéis de Diamante e Sacos de Dinheiro ($) em voxels para resgatar.
-- **HUD Retrô:** Pontuação (inicia em 2000), cronômetro de 20 minutos regressivo, indicador de vidas e tela atual.
-- **Filtro CRT:** Efeito de scanlines, vinheta e fósforo retrô ativável/desativável.
-- **Sintetizador Web Audio 8-bit:** Efeitos sonoros autônomos sem necessidade de arquivos externos (pulo, cipó/yodel, mordida, afundamento, tesouros, passos).
+A **first-person (FPS)** recreation of the timeless Atari 2600 classic **Pitfall!**, built with Three.js and a retro cube/voxel aesthetic that simulates three-dimensional pixels.
 
 ---
 
-## 🚀 Como Executar
+## 🎮 Original Controls & Mechanics
 
-### Usando o Makefile:
+Just like in the original Atari 2600 game:
+- **Straight-Line Movement (1D):** The player only moves **FORWARD** or **BACKWARD** along the jungle corridor (no sideways strafing).
+  - `[W]` or `[Up Arrow]` or touch button: **Walk Forward**
+  - `[S]` or `[Down Arrow]` or touch button: **Walk Backward**
+- **Single Action Button:**
+  - `[Space]`, `[Enter]` or `[Mouse Click / Button Tap]`:
+    - On the ground: **JUMP** over obstacles (logs, campfires, scorpions).
+    - Grabbing the vine: **LET GO OF THE VINE**, launching Harry through the air with the swing's momentum to cross the chasm!
+- **Automatic Vine:** When jumping or getting close to the vine swinging over quicksand or a crocodile pit, Harry **grabs the vine automatically**, reproducing the classic 8-bit Tarzan yell!
+- **Tree Corridor:** Dense rows of stylized cube trees on the sides form a continuous jungle corridor with an overhead canopy.
+- **Crocodiles:** Can be used as stepping stones to cross ponds, **but only while their mouths are closed**! If a mouth opens, Harry gets bitten!
+- **Logs:** Rolling and stationary logs. Tripping on them costs points.
+- **Treasures:** Voxel Gold Bars, Silver Bars, Diamond Rings and Money Bags ($) to rescue.
+- **Retro HUD:** Score (starts at 2000), 20-minute countdown timer, lives indicator and current screen.
+- **CRT Filter:** Toggleable scanlines, vignette and retro phosphor effect.
+- **8-bit Web Audio Synthesizer:** Self-contained sound effects with no external files needed (jump, vine/yodel, bite, sinking, treasures, footsteps).
+
+---
+
+## 🚀 How to Run
+
+### Using the Makefile:
 ```bash
-# Iniciar o jogo (abre o servidor e o navegador automaticamente)
+# Start the game (launches the server and opens the browser automatically)
 make
 
-# Ou especificando o comando:
+# Or specifying the command:
 make run
 
-# Outros comandos úteis:
-make install    # Instalar dependências do npm
-make build      # Gerar build otimizado de produção
-make preview    # Testar o build de produção localmente
-make deploy     # Gerar arquivo HTML único (standalone) para jogar offline
-make clean      # Limpar pasta dist
-make help       # Ver todos os comandos disponíveis
+# Other useful commands:
+make install    # Install npm dependencies
+make build      # Generate optimized production build
+make preview    # Test the production build locally
+make deploy     # Generate a single standalone HTML file for offline play
+make clean      # Clean the dist folder
+make help       # See all available commands
 ```
 
-### Usando o npm diretamente:
+### Using npm directly:
 ```bash
 npm run dev
-# Ou para build:
+# Or for build:
 npm run build
 npm run preview
 ```
