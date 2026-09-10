@@ -1,5 +1,9 @@
 // 8-bit Retro Web Audio Synthesizer for Atari Pitfall 3D
-// Fully self-contained without external audio assets
+// Fully self-contained without external audio assets.
+// Os 6 efeitos clássicos (pulo, tesouro, morte, queda, tropeço, cipó) foram
+// re-sintetizados por análise espectral dos sons autênticos do Atari 2600
+// (referência: meatfighter/pitfall-js — nenhum arquivo de áudio copiado,
+// tudo gerado via Web Audio API em estilo TIA: onda quadrada com pitch em degraus).
 
 class RetroAudio {
   constructor() {
@@ -23,113 +27,75 @@ class RetroAudio {
     return this.enabled;
   }
 
-  // Authentic Atari Pitfall "Tarzan Yell" when grabbing the vine
-  playTarzanYell() {
+  // Sequência TIA: onda quadrada com pitch em degraus. notes = [[freqHz, durSec], ...]
+  playSteps(notes, volume = 0.2, delay = 0) {
     if (!this.enabled) return;
     this.init();
-    const now = this.ctx.currentTime;
-
-    // Classic Activision pitched yodel notes
-    const notes = [
-      660, 587, 523, 660, 587, 523,
-      784, 660, 523, 440, 392, 330,
-      294, 261, 220, 196, 164, 130
-    ];
-    const noteDuration = 0.055;
-
-    notes.forEach((freq, idx) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(freq, now + idx * noteDuration);
-
-      const startTime = now + idx * noteDuration;
-      const endTime = startTime + noteDuration;
-
-      gain.gain.setValueAtTime(0.18, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, endTime);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(startTime);
-      osc.stop(endTime);
-    });
-  }
-
-  // Classic Atari Jump Boing
-  playJump() {
-    if (!this.enabled) return;
-    this.init();
-    const now = this.ctx.currentTime;
+    const startAt = this.ctx.currentTime + delay;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
 
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(140, now);
-    osc.frequency.exponentialRampToValueAtTime(620, now + 0.16);
+    osc.type = 'square';
+    let t = startAt;
+    notes.forEach(([freq, dur]) => {
+      osc.frequency.setValueAtTime(freq, t);
+      t += dur;
+    });
 
-    gain.gain.setValueAtTime(0.22, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+    gain.gain.setValueAtTime(volume, startAt);
+    gain.gain.setValueAtTime(volume, Math.max(startAt, t - 0.03));
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.02);
 
     osc.connect(gain);
     gain.connect(this.ctx.destination);
 
-    osc.start(now);
-    osc.stop(now + 0.18);
+    osc.start(startAt);
+    osc.stop(t + 0.03);
   }
 
-  // Treasure pickup chime (Gold / Diamonds / Money Bag)
+  // Autêntico grito do Tarzan do Atari 2600 ao agarrar o cipó:
+  // rosnado grave + iodel alternado 175/210Hz + cauda (total ~1.9s)
+  playTarzanYell() {
+    if (!this.enabled) return;
+    const notes = [
+      [100, 0.45],
+      [175, 0.12], [210, 0.12], [175, 0.12], [210, 0.12],
+      [175, 0.12], [210, 0.12], [175, 0.11],
+      [210, 0.06], [175, 0.06], [210, 0.06], [175, 0.06],
+      [175, 0.45],
+    ];
+    this.playSteps(notes, 0.2);
+  }
+
+  // Pulo clássico do Atari: varredura quadrada ascendente 300 -> 700Hz (~0.2s)
+  playJump() {
+    if (!this.enabled) return;
+    const notes = [
+      [300, 0.05], [420, 0.05], [525, 0.05], [700, 0.07],
+    ];
+    this.playSteps(notes, 0.22);
+  }
+
+  // Tesouro autêntico: estalo de ruído + arpejo quadrado grave (~0.65s)
   playTreasure() {
     if (!this.enabled) return;
     this.init();
-    const now = this.ctx.currentTime;
-    const freqs = [523.25, 659.25, 783.99, 1046.50, 1318.51]; // C5, E5, G5, C6, E6
-
-    freqs.forEach((freq, i) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(freq, now + i * 0.05);
-
-      const tStart = now + i * 0.05;
-      const tEnd = tStart + 0.12;
-
-      gain.gain.setValueAtTime(0.14, tStart);
-      gain.gain.exponentialRampToValueAtTime(0.001, tEnd);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(tStart);
-      osc.stop(tEnd);
-    });
+    this.playNoise(0.1, 0.18, this.ctx.currentTime);
+    const notes = [
+      [140, 0.06], [175, 0.06], [210, 0.2], [175, 0.08], [210, 0.18],
+    ];
+    this.playSteps(notes, 0.16, 0.1);
   }
 
-  // Rolling log trip / penalty sound
+  // Tropeço autêntico (kneel): zumbido áspero descendente 700 -> 60Hz (~0.4s)
   playTrip() {
     if (!this.enabled) return;
     this.init();
-    const now = this.ctx.currentTime;
-
-    // Harsh buzz down
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(180, now);
-    osc.frequency.linearRampToValueAtTime(50, now + 0.25);
-
-    gain.gain.setValueAtTime(0.3, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(now);
-    osc.stop(now + 0.25);
+    this.playNoise(0.35, 0.12, this.ctx.currentTime);
+    const notes = [
+      [700, 0.05], [400, 0.05], [300, 0.05], [150, 0.1], [80, 0.15],
+    ];
+    this.playSteps(notes, 0.26);
   }
 
   // Crocodile chomp / snap
@@ -178,118 +144,44 @@ class RetroAudio {
     osc.stop(now + 0.08);
   }
 
-  // Authentic Atari 2600 Life Lost Sound (Descending tragic 8-bit arpeggio with pitch bend)
+  // Morte autêntica do Atari 2600: degraus graves 140 -> 80 -> 140 -> 100Hz (~2.1s)
   playLifeLost() {
     if (!this.enabled) return;
-    this.init();
-    const now = this.ctx.currentTime;
-
-    // Classic 8-bit descending minor cascade
-    const notes = [
-      { freq: 440, duration: 0.09 }, // A4
-      { freq: 370, duration: 0.09 }, // F#4
-      { freq: 311, duration: 0.11 }, // Eb4
-      { freq: 261, duration: 0.13 }, // C4
-      { freq: 207, duration: 0.15 }, // G#3
-      { freq: 155, duration: 0.28 }, // Eb3 (deep sad resonant note)
-    ];
-
-    let t = now;
-    notes.forEach((n, idx) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = idx % 2 === 0 ? 'sawtooth' : 'square';
-      osc.frequency.setValueAtTime(n.freq, t);
-      osc.frequency.exponentialRampToValueAtTime(n.freq * 0.90, t + n.duration);
-
-      gain.gain.setValueAtTime(0.24, t);
-      gain.gain.exponentialRampToValueAtTime(0.01, t + n.duration);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(t);
-      osc.stop(t + n.duration);
-
-      t += n.duration * 0.85;
-    });
-
-    // Low sub-bass thud at the end
-    const thud = this.ctx.createOscillator();
-    const thudGain = this.ctx.createGain();
-    thud.type = 'triangle';
-    thud.frequency.setValueAtTime(95, now + 0.45);
-    thud.frequency.exponentialRampToValueAtTime(30, now + 0.9);
-    thudGain.gain.setValueAtTime(0.28, now + 0.45);
-    thudGain.gain.exponentialRampToValueAtTime(0.01, now + 0.9);
-    thud.connect(thudGain);
-    thudGain.connect(this.ctx.destination);
-    thud.start(now + 0.45);
-    thud.stop(now + 0.9);
-
-    // Initial impact pop
-    this.playNoise(0.06, 0.18, now);
+    this.playSteps(
+      [
+        [140, 0.55],
+        [80, 0.5],
+        [140, 0.35],
+        [100, 0.7],
+      ],
+      0.24,
+    );
   }
 
-  // Dramatic Game Over Fanfare
+  // Fim de jogo: o jingle de morte original (o cartucho repete o mesmo som)
   playGameOver() {
     if (!this.enabled) return;
-    this.init();
-    const now = this.ctx.currentTime;
-
-    const notes = [
-      { freq: 330, duration: 0.18 },
-      { freq: 293, duration: 0.18 },
-      { freq: 261, duration: 0.22 },
-      { freq: 220, duration: 0.24 },
-      { freq: 174, duration: 0.28 },
-      { freq: 130, duration: 0.55 },
-    ];
-
-    let t = now;
-    notes.forEach((n, idx) => {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(n.freq, t);
-      osc.frequency.exponentialRampToValueAtTime(n.freq * 0.88, t + n.duration);
-
-      gain.gain.setValueAtTime(0.25, t);
-      gain.gain.exponentialRampToValueAtTime(0.01, t + n.duration);
-
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(t);
-      osc.stop(t + n.duration);
-
-      t += n.duration * 0.9;
-    });
+    this.playSteps(
+      [
+        [140, 0.55],
+        [80, 0.5],
+        [140, 0.35],
+        [100, 0.7],
+      ],
+      0.24,
+    );
   }
 
-  // Quicksand / Tar pit fall
+  // Queda no buraco autêntica: dois degraus graves 80 -> 140Hz (~0.4s)
   playSink() {
     if (!this.enabled) return;
-    this.init();
-    const now = this.ctx.currentTime;
-
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(220, now);
-    osc.frequency.exponentialRampToValueAtTime(30, now + 0.6);
-
-    gain.gain.setValueAtTime(0.3, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(now);
-    osc.stop(now + 0.6);
+    this.playSteps(
+      [
+        [80, 0.2],
+        [140, 0.2],
+      ],
+      0.28,
+    );
   }
 
   // Disappearing quicksand opening / rumbling

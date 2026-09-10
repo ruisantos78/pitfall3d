@@ -159,12 +159,16 @@ pitfall/
 
 #### [`src/audio.js`](file:///home/ruisantos/Projects/pitfall/src/audio.js)
 - Motor de áudio sem arquivos externos. Métodos:
-  - `playJump()`: onda quadrada com rampa exponencial de frequência (boing).
-  - `playTarzanYell()`: sequência afinada de tons imitando o grito original do Atari 2600.
-  - `playTrip()`: tom baixo de tropeço com decréscimo de pontuação.
+  - `playSteps(notes, volume, delay)`: helper estilo TIA — onda quadrada com pitch em degraus (`notes = [[freqHz, durSec], ...]`).
+  - Os 6 efeitos clássicos foram re-sintetizados por análise espectral dos sons autênticos do Atari 2600 (ref. meatfighter/pitfall-js, sem copiar arquivos):
+  - `playJump()`: varredura quadrada ascendente 300→420→525→700Hz (~0.2s).
+  - `playTreasure()`: estalo de ruído + arpejo quadrado 140/175/210Hz (~0.65s).
+  - `playTarzanYell()`: rosnado 100Hz + iodel alternado 175/210Hz (~1.9s) ao agarrar o cipó.
+  - `playTrip()`: zumbido áspero descendente 700→80Hz + ruído (~0.4s, kneel).
+  - `playSink()`: dois degraus graves 80→140Hz (~0.4s, queda no buraco).
+  - `playLifeLost()` & `playGameOver()`: jingle de morte original 140→80→140→100Hz (~2.1s).
   - `playChomp()` & `playCrocSnap()`: ruído branco filtrado para mordida e estalo das presas.
-  - `playSink()`, `playQuicksandRumble()`, `playGroundThud()`: efeitos para areia movediça.
-  - `playTreasure()`: acorde arpejado brilhante.
+  - `playQuicksandRumble()`, `playGroundThud()`: efeitos autorais para a areia movediça em zíper.
   - `playLifeLost()`: arpejo menor descendente retrô de 6 notas (440Hz -> 155Hz) com bend de tom, impacto e sub-grave ao perder vida.
   - `playGameOver()`: fanfarra dramática menor descendente com osciladores dente-de-serra.
 
