@@ -756,14 +756,23 @@ export function createPlayerArmsModel() {
   group.add(leftArm);
   group.add(rightArm);
 
-  // Brown grip bar held between the raised hands while swinging on a vine
-  // (matches the brown handle bar at the vine tip for the holding illusion).
   const gripBar = new THREE.Mesh(
     new THREE.BoxGeometry(0.56, 0.09, 0.09),
     new THREE.MeshLambertMaterial({ color: 0x9a5c20 })
   );
   gripBar.position.set(0, 0.15, -0.45);
   gripBar.visible = false;
+  
+  // Fake vine extending upwards from the grip bar (visible during the swing)
+  const fakeVine = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, 4.0, 0.08),
+    new THREE.MeshLambertMaterial({ color: C.VINE })
+  );
+  // Center it above the bar and angle it slightly forward
+  fakeVine.position.set(0, 2.0, -0.5); 
+  fakeVine.rotation.x = -Math.PI / 8;
+  gripBar.add(fakeVine);
+  
   group.add(gripBar);
 
   return {

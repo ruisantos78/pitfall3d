@@ -286,6 +286,12 @@ export class Player {
     this.vz = THREE.MathUtils.lerp(this.vz, targetVz, delta * 15);
     this.z += this.vz * delta;
 
+    // Prevent walking backwards off the starting edge of the map
+    if (this.z > 0) {
+      this.z = 0;
+      this.vz = Math.min(this.vz, 0);
+    }
+
     // Single action button: JUMP
     if (this.actionJustPressed) {
       this.actionJustPressed = false;
@@ -615,20 +621,23 @@ export class Player {
     // Off the vine: hide the grip bar (only shown while swinging).
     if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
 
-    // Queda de cara: câmera rente ao chão, inclinada para baixo e sem head-bob.
+    // Queda de cara: o jogador tropeça e as mãos espalmam no chão
     if (isTripped) {
-      const targetY = this.y + this.PRONE_EYE_HEIGHT;
+      // Parar a câmera mais alto para que os braços não atravessem o chão
+      const targetY = this.y + 1.2; 
       this.camera.position.set(0, THREE.MathUtils.lerp(this.camera.position.y, targetY, delta * 8), this.z);
-      // No Three.js, a rotação X negativa aponta a câmera para o chão.
-      this.camera.rotation.x = THREE.MathUtils.lerp(this.camera.rotation.x, -0.95, delta * 6);
+      // Câmera olha para o chão
+      this.camera.rotation.x = THREE.MathUtils.lerp(this.camera.rotation.x, -0.8, delta * 6);
       this.camera.rotation.z = 0;
       this.camera.rotation.y = 0;
       if (this.arms) {
-        // Braços estendidos à frente, apoiados no chão.
-        this.arms.leftArm.position.set(-0.32, -0.18, -0.9);
-        this.arms.rightArm.position.set(0.32, -0.18, -0.9);
-        this.arms.leftArm.rotation.x = Math.PI / 2.2;
-        this.arms.rightArm.rotation.x = Math.PI / 2.2;
+        // Braços estendidos firmemente para frente para segurar a queda
+        // Posição levantada (-0.1) para simular o toque no chão
+        this.arms.leftArm.position.set(-0.32, -0.1, -0.7);
+        this.arms.rightArm.position.set(0.32, -0.1, -0.7);
+        // Rotação reta para apoiar as mãos
+        this.arms.leftArm.rotation.x = Math.PI / 2.5;
+        this.arms.rightArm.rotation.x = Math.PI / 2.5;
       }
       return;
     }

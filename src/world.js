@@ -507,14 +507,14 @@ export class World {
       wasOpen: false,
       rumblePlayed: false,
       // Ciclo (segundos): pausa fechado e sólido (0.5s) -> abrindo em onda
-      // entrada->saída (2.2s) -> totalmente aberto (5.0s) -> fechando em onda
-      // a partir da borda do herói, entrada->saída (2.2s, ~9.1 m/s vs 9.0 do
-      // Harry: dá para correr junto com a onda enquanto o pit fecha).
-      // Total: 9.9s, aberto na maior parte do tempo.
+      // entrada->saída (1.8s) -> totalmente aberto (5.0s) -> fechando em onda
+      // a partir da borda do herói, entrada->saída (1.8s, ~11.1 m/s vs 9.0 do
+      // Harry: a onda é visivelmente mais rápida que o herói, garantindo segurança).
+      // Total: 9.1s, aberto na maior parte do tempo.
       closedDur: 0.5,
-      openingDur: 2.2,
+      openingDur: 1.8,
       openDur: 5.0,
-      closingDur: 2.2,
+      closingDur: 1.8,
     };
 
     this.activeOpeningPits.push(pitData);
