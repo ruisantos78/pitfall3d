@@ -178,7 +178,7 @@ export class World {
     const hasCentralHazard = ['QUICKSAND_VINE', 'TAR_PIT_VINE', 'CROCODILE_POND', 'CROCODILE_VINE'].includes(screenType);
     // Meio-comprimento do lago central: 16m nos lagos dos crocodilos (32m,
     // com vãos de pulo entre eles), 10m no lago do cipó e no piche (20m).
-    const centralHazardHalf = ['CROCODILE_POND', 'CROCODILE_VINE'].includes(screenType) ? 16 : 10;
+    const centralHazardHalf = ['CROCODILE_POND', 'CROCODILE_VINE'].includes(screenType) ? 13 : 10;
     const hazardStartZ = (startZ + endZ) / 2 + centralHazardHalf;
     const hazardEndZ = (startZ + endZ) / 2 - centralHazardHalf;
 
@@ -302,7 +302,7 @@ export class World {
 
       case 'CROCODILE_POND':
         // Pond with 3 spaced crocodiles (jump from one to the next)!
-        this.addWaterPond(group, index, midZ, 32);
+        this.addWaterPond(group, index, midZ, 26);
         this.addCrocodileTrio(group, index, midZ);
         this.addTreasure(group, index, midZ - 20, 'diamond');
         break;
@@ -310,7 +310,7 @@ export class World {
       case 'CROCODILE_VINE':
         // Crocodile pond + UM único cipó alto (travessia com pulo para
         // alcançar + ajuda dos jacarés).
-        this.addWaterPond(group, index, midZ, 32);
+        this.addWaterPond(group, index, midZ, 26);
         this.addCrocodileTrio(group, index, midZ);
         this.addVine(group, index, midZ + 5);
         this.addTreasure(group, index, midZ - 20, 'diamond');
@@ -557,12 +557,12 @@ export class World {
 
   addCrocodileTrio(group, screenIndex, centerZ) {
     // 3 Crocodiles spaced along the pond (X=0, spaced in Z).
-    // Modelo reduzido (voxel 0.26, ~19% menor): cada jacaré cobre
-    // [z-1.3, z+3.2] (4.5m) e a zona segura das costas vai até z+0.65.
-    // Com espaçamento 8.2, o salto costas→costas é de 6.25m (pulo máx.
-    // 6.75m): dá para pular direto de uma para a outra sem pisar no chão,
-    // como no original. Entrada (6.15m) e saída (5.5m) também cabem no pulo.
-    const offsetsZ = [8.2, 0, -8.2];
+    // Cada jacaré cobre [z-1.3, z+3.2] (zona segura nas costas vai até z+0.65).
+    // O espaçamento agora é EXATAMENTE 6.75m (a distância cravada de um pulo máximo).
+    // O lago foi reduzido para 26m. Assim, o primeiro jacaré (8.0m) fica a apenas 5.0m
+    // da borda visual do lago (13.0m). Um pulo direto da borda de morte (12.0m) 
+    // cai exatamente em 5.25m, bem no bico do primeiro jacaré (-2.75 do centro).
+    const offsetsZ = [8.0, 1.25, -5.5];
     offsetsZ.forEach((offset, idx) => {
       const croc = createCrocodileModel(0.26);
       const zPos = centerZ + offset;
@@ -587,7 +587,7 @@ export class World {
     // pulando — parado no chão nunca agarra, garantido no checkVineGrab).
     const vine = createVineModel(24, 0.28);
     // Position pivot high up in canopy overhead
-    vine.pivot.position.set(0, 10.0, centerZ);
+    vine.pivot.position.set(0, 9.0, centerZ);
     group.add(vine.pivot);
 
     this.activeVines.push({
