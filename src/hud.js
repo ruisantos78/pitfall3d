@@ -128,10 +128,10 @@ export class HUD {
       // If within 15 units of a crocodile
       if (nearestCroc && minDistance < 15) {
         // Check if player is currently standing on this crocodile
-        const isStandingOnThisCroc = player.isGrounded && Math.abs(player.y - 0.35) < 0.25 && (player.z >= nearestCroc.z - 1.6 && player.z <= nearestCroc.z + 3.9);
+        const isStandingOnThisCroc = player.isGrounded && Math.abs(player.y - 0.35) < 0.25 && (player.z >= nearestCroc.z - 1.3 && player.z <= nearestCroc.z + 3.2);
 
         if (isStandingOnThisCroc) {
-          if (player.z <= nearestCroc.z + 0.8) {
+          if (player.z <= nearestCroc.z + 0.65) {
             // ON THE EYES! 100% SAFE - THE CLASSIC ATARI STRATEGY!
             this.crocPromptEl.className = 'hud-box croc-status eye-safe';
             if (this.crocTextEl) {

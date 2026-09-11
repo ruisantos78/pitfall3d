@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { audio } from './audio.js';
 import { SCREEN_LENGTH } from './world.js';
 import { createPlayerArmsModel } from './models.js';
-import { t, getHighScore, submitScore } from './i18n.js';
+import { t, getHighScore, getShowHelp, submitScore } from './i18n.js';
 
 export const GRAVITY = 28.0;
 export const JUMP_VELOCITY = 10.5;
@@ -210,8 +210,8 @@ export class Player {
     // Check if standing on an opening crocodile snout (NOT on the eyes!)
     if (this.isGrounded && Math.abs(this.y - 0.35) < 0.25) {
       const croc = this.getCrocodileAt(world, this.z);
-      // Only bite if on the FRONT MOUTH (Z > croc.z + 0.8). If on the eyes/skull, 100% IMMUNE!
-      if (croc && croc.isOpen && this.z > croc.z + 0.8) {
+      // Only bite if on the FRONT MOUTH (Z > croc.z + 0.65). If on the eyes/skull, 100% IMMUNE!
+      if (croc && croc.isOpen && this.z > croc.z + 0.65) {
         audio.playChomp();
         this.die('death.crocBite');
         return;
@@ -343,8 +343,8 @@ export class Player {
         closest = c;
       }
     }
-    // Only return if player is within this specific crocodile's physical bounds (-1.6 to +3.9)
-    if (closest && z >= closest.z - 1.6 && z <= closest.z + 3.9) {
+    // Only return if player is within this specific crocodile's physical bounds (-1.3 to +3.2)
+    if (closest && z >= closest.z - 1.3 && z <= closest.z + 3.2) {
       return closest;
     }
     return null;
@@ -360,7 +360,7 @@ export class Player {
           if (hazard.type === 'water') {
             const croc = this.getCrocodileAt(world, z);
             if (croc) {
-              const isOnMouth = z > croc.z + 0.8;
+              const isOnMouth = z > croc.z + 0.65;
 
               if (croc.isOpen && isOnMouth) {
                 // Stepped directly into the open mouth!
@@ -369,8 +369,8 @@ export class Player {
                 return -10;
               }
 
-              // If on the eyes/skull (z <= croc.z + 0.8): 100% IMMUNE TO MOUTH!
-              // If on closed snout (z > croc.z + 0.8 && !croc.isOpen): SAFE!
+              // If on the eyes/skull (z <= croc.z + 0.65): 100% IMMUNE TO MOUTH!
+              // If on closed snout (z > croc.z + 0.65 && !croc.isOpen): SAFE!
               return 0.35;
             }
           }
@@ -406,9 +406,11 @@ export class Player {
     return 0.0;
   }
 
-  // Automatic vine grab when close in distance
+  // Automatic vine grab when close in distance (só no ar: é preciso PULAR)
   checkVineGrab(world) {
     if (this.justReleasedVineTimer > 0) return;
+    // Parado no chão nunca agarra: o cipó fica alto de propósito.
+    if (this.isGrounded) return;
     const tipPos = new THREE.Vector3();
 
     for (const vineData of world.activeVines) {
@@ -422,8 +424,9 @@ export class Player {
       const distZ = Math.abs(this.z - tipPos.z);
       const distY = Math.abs((this.y + EYE_HEIGHT) - tipPos.y);
 
-      // Grab automatically when near the vine!
-      if (distZ < 1.9 && distY < 2.4) {
+      // Grab automatically when near the vine (janela generosa em Z para
+      // compensar o balanço rápido da ponta)!
+      if (distZ < 2.2 && distY < 2.4) {
         this.attachedVine = vineData;
         this.ignoredVine = null;
         this.isGrounded = false;
@@ -431,9 +434,11 @@ export class Player {
         this.vz = 0;
         audio.playTarzanYell();
 
-        // Show HUD prompt
-        const prompt = document.getElementById('vine-prompt');
-        if (prompt) prompt.classList.add('active');
+        // Show HUD prompt (só com a ajuda na tela ligada)
+        if (getShowHelp()) {
+          const prompt = document.getElementById('vine-prompt');
+          if (prompt) prompt.classList.add('active');
+        }
         break;
       }
     }

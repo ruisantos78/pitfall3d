@@ -308,16 +308,11 @@ export class World {
         break;
 
       case 'CROCODILE_VINE':
-        // Crocodile pond + TWO vines: grab the first over croc 1, press jump
-        // at the forward extreme to swing straight onto the second
-        // (vine-to-vine transfer) and release it toward the exit!
+        // Crocodile pond + UM único cipó alto (travessia com pulo para
+        // alcançar + ajuda dos jacarés).
         this.addWaterPond(group, index, midZ, 32);
         this.addCrocodileTrio(group, index, midZ);
-        this.addVine(group, index, midZ + 13);
-        // Second vine in anti-phase: when vine 1 is at its forward extreme
-        // (transfer moment), vine 2's tip is at its backward extreme, right
-        // next to the player for the press-to-transfer catch.
-        this.addVine(group, index, midZ - 2, this.activeVines[this.activeVines.length - 1].time + Math.PI);
+        this.addVine(group, index, midZ + 5);
         this.addTreasure(group, index, midZ - 20, 'diamond');
         break;
 
@@ -562,15 +557,17 @@ export class World {
 
   addCrocodileTrio(group, screenIndex, centerZ) {
     // 3 Crocodiles spaced along the pond (X=0, spaced in Z).
-    // Cada jacaré cobre [z-1.6, z+3.9] (5.5m de costas curtas): com
-    // espaçamento 10.7 sobram vãos d'água de 5.2m entre eles — correr pelo
-    // vão mata (queda > 3m), então é preciso PULAR de um jacaré para o outro
-    // (pulo máx. 6.75m).
-    const offsetsZ = [10.7, 0, -10.7];
+    // Modelo reduzido (voxel 0.26, ~19% menor): cada jacaré cobre
+    // [z-1.3, z+3.2] (4.5m) e a zona segura das costas vai até z+0.65.
+    // Com espaçamento 8.2, o salto costas→costas é de 6.25m (pulo máx.
+    // 6.75m): dá para pular direto de uma para a outra sem pisar no chão,
+    // como no original. Entrada (6.15m) e saída (5.5m) também cabem no pulo.
+    const offsetsZ = [8.2, 0, -8.2];
     offsetsZ.forEach((offset, idx) => {
-      const croc = createCrocodileModel(0.32);
+      const croc = createCrocodileModel(0.26);
       const zPos = centerZ + offset;
-      croc.mesh.position.set(0, -0.3, zPos);
+      // Topo em Y=0.35 (0.78 do modelo - 0.43): mesma altura física de antes.
+      croc.mesh.position.set(0, -0.43, zPos);
       croc.mesh.rotation.y = 0; // Snouts point towards incoming player (+Z)!
       group.add(croc.mesh);
 
@@ -586,9 +583,11 @@ export class World {
   }
 
   addVine(group, screenIndex, centerZ, phaseTime = null) {
-    const vine = createVineModel(32, 0.28);
+    // Cipó alto mas alcançável: ponta em ~3.3m do solo (só agarra no ar,
+    // pulando — parado no chão nunca agarra, garantido no checkVineGrab).
+    const vine = createVineModel(24, 0.28);
     // Position pivot high up in canopy overhead
-    vine.pivot.position.set(0, 10.5, centerZ);
+    vine.pivot.position.set(0, 10.0, centerZ);
     group.add(vine.pivot);
 
     this.activeVines.push({

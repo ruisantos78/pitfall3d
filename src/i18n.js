@@ -17,7 +17,7 @@ const STRINGS = {
     'menu.actionKeys': '[ESPAÇO] / botão circular:',
     'menu.actionVal': 'PULAR ou SOLTAR O CIPÓ',
     'menu.vineK': 'CIPÓ:',
-    'menu.vineV': 'Agarrado automaticamente ao tocar! Pressione [ESPAÇO] para soltar e cruzar abismos e crocodilos!',
+    'menu.vineV': 'Pule para alcançar o cipó alto! Pressione [ESPAÇO] para soltar e cruzar abismos e crocodilos!',
     'menu.crocK': 'CROCODILOS:',
     'menu.crocV': 'Só pise nas costas quando a boca estiver FECHADA!',
     'menu.logsK': 'TRONCOS:',
@@ -89,7 +89,7 @@ const STRINGS = {
     'menu.actionKeys': '[SPACE] / round button:',
     'menu.actionVal': 'JUMP or LET GO OF THE VINE',
     'menu.vineK': 'VINE:',
-    'menu.vineV': 'Grabbed automatically on touch! Press [SPACE] to let go and cross pits and crocodiles!',
+    'menu.vineV': 'Jump to reach the high vine! Press [SPACE] to let go and cross pits and crocodiles!',
     'menu.crocK': 'CROCODILES:',
     'menu.crocV': 'Only step on their backs while the mouth is CLOSED!',
     'menu.logsK': 'LOGS:',
@@ -150,7 +150,7 @@ const STRINGS = {
 };
 
 let lang = 'pt';
-let showHelp = true;
+let showHelp = false;
 let highScore = 0;
 
 try {
