@@ -176,8 +176,11 @@ export class World {
     // Build Ground Voxel Strips
     // If screen has a pit/pond in the middle, create a gap in ground
     const hasCentralHazard = ['QUICKSAND_VINE', 'TAR_PIT_VINE', 'CROCODILE_POND', 'CROCODILE_VINE'].includes(screenType);
-    const hazardStartZ = (startZ + endZ) / 2 + 10;
-    const hazardEndZ = (startZ + endZ) / 2 - 10;
+    // Meio-comprimento do lago central: 16m nos lagos dos crocodilos (32m,
+    // com vãos de pulo entre eles), 10m no lago do cipó e no piche (20m).
+    const centralHazardHalf = ['CROCODILE_POND', 'CROCODILE_VINE'].includes(screenType) ? 16 : 10;
+    const hazardStartZ = (startZ + endZ) / 2 + centralHazardHalf;
+    const hazardEndZ = (startZ + endZ) / 2 - centralHazardHalf;
 
     const midZ = (startZ + endZ) / 2;
     const hasDisappearingPit = ['DISAPPEARING_QUICKSAND', 'QUICKSAND_AND_LOG'].includes(screenType);
@@ -194,7 +197,7 @@ export class World {
     for (let z = 0; z < length; z += 1.5) {
       const worldZ = startZ - z;
       const isOverHazard = hasCentralHazard && (worldZ <= hazardStartZ && worldZ >= hazardEndZ);
-      const isOverDisappearingPit = hasDisappearingPit && Math.abs(worldZ - pitCenterZ) <= 4.6;
+      const isOverDisappearingPit = hasDisappearingPit && Math.abs(worldZ - pitCenterZ) <= 10.2;
 
       if (!isOverHazard) {
         // Path corridor voxels (-3 to +3)
@@ -212,7 +215,11 @@ export class World {
     if (groundVoxels.length > 0) {
       const groundGeo = createVoxelGeometry(groundVoxels, 1.0, false);
       const groundMesh = new THREE.Mesh(groundGeo, this.groundMaterial);
-      groundMesh.position.set(0, -1.0, startZ);
+      // Voxels com center=false ocupam [x, x+1]: as colunas -4..4 geram
+      // [-4, +5]. O deslocamento -0.5 em X simetriza a faixa para [-4.5, +4.5],
+      // espelhando a borda direita na esquerda (duas linhas verdes cada lado)
+      // e centralizando o buraco do pit sobre o tampão.
+      groundMesh.position.set(-0.5, -1.0, startZ);
       groundMesh.receiveShadow = true;
       group.add(groundMesh);
     }
@@ -221,12 +228,14 @@ export class World {
     const borderGeo = new THREE.BoxGeometry(16, 1, length);
     const borderMat = new THREE.MeshLambertMaterial({ color: 0x224e18, flatShading: true });
 
+    // Juntas de topo com a faixa do chão (que vai até ±4.5): sem sobreposição
+    // coplanar (evita z-fighting) em nenhum dos lados.
     const leftBorder = new THREE.Mesh(borderGeo, borderMat);
-    leftBorder.position.set(-12, -0.5, (startZ + endZ) / 2);
+    leftBorder.position.set(-12.5, -0.5, (startZ + endZ) / 2);
     group.add(leftBorder);
 
     const rightBorder = new THREE.Mesh(borderGeo, borderMat);
-    rightBorder.position.set(12, -0.5, (startZ + endZ) / 2);
+    rightBorder.position.set(12.5, -0.5, (startZ + endZ) / 2);
     group.add(rightBorder);
   }
 
@@ -292,18 +301,24 @@ export class World {
         break;
 
       case 'CROCODILE_POND':
-        // Pond with 3 crocodiles!
-        this.addWaterPond(group, index, midZ, 20);
+        // Pond with 3 spaced crocodiles (jump from one to the next)!
+        this.addWaterPond(group, index, midZ, 32);
         this.addCrocodileTrio(group, index, midZ);
-        this.addTreasure(group, index, midZ - 14, 'diamond');
+        this.addTreasure(group, index, midZ - 20, 'diamond');
         break;
 
       case 'CROCODILE_VINE':
-        // Crocodile pond + Vine overhead!
-        this.addWaterPond(group, index, midZ, 20);
+        // Crocodile pond + TWO vines: grab the first over croc 1, press jump
+        // at the forward extreme to swing straight onto the second
+        // (vine-to-vine transfer) and release it toward the exit!
+        this.addWaterPond(group, index, midZ, 32);
         this.addCrocodileTrio(group, index, midZ);
-        this.addVine(group, index, midZ);
-        this.addTreasure(group, index, midZ - 14, 'diamond');
+        this.addVine(group, index, midZ + 13);
+        // Second vine in anti-phase: when vine 1 is at its forward extreme
+        // (transfer moment), vine 2's tip is at its backward extreme, right
+        // next to the player for the press-to-transfer catch.
+        this.addVine(group, index, midZ - 2, this.activeVines[this.activeVines.length - 1].time + Math.PI);
+        this.addTreasure(group, index, midZ - 20, 'diamond');
         break;
 
       case 'CAMPFIRE_TREASURE':
@@ -345,6 +360,62 @@ export class World {
     });
   }
 
+  // Textura listrada de alerta (amarelo/preto) para a sinalização de queda de troncos.
+  makeHazardStripeTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffcc00';
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.fillStyle = '#141414';
+    ctx.save();
+    ctx.translate(64, 64);
+    ctx.rotate(-Math.PI / 4);
+    for (let x = -128; x < 128; x += 32) {
+      ctx.fillRect(x, -128, 16, 256);
+    }
+    ctx.restore();
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    return tex;
+  }
+
+  // Sinalização de alerta no chão onde o tronco vai cair: disco listrado +
+  // anel vermelho pulsante, bem visível de longe para o jogador frear a tempo.
+  createFallingLogWarning(z) {
+    const group = new THREE.Group();
+    if (!this.hazardStripeTex) {
+      this.hazardStripeTex = this.makeHazardStripeTexture();
+    }
+    const discMat = new THREE.MeshBasicMaterial({
+      map: this.hazardStripeTex,
+      transparent: true,
+      opacity: 0.75,
+      depthWrite: false,
+    });
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(1.9, 24), discMat);
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = 0.02;
+    group.add(disc);
+
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xff2200,
+      transparent: true,
+      opacity: 0.8,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(1.9, 2.3, 24), ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.03;
+    group.add(ring);
+
+    group.position.set(0, 0, z);
+    return { group, disc, ring, discMat, ringMat };
+  }
+
   addRollingLog(group, screenIndex, z, startZ, endZ) {
     const log = createLogModel(0.18);
     // Tronco cai do céu: nasce lá no alto para o jogador ver chegando
@@ -352,24 +423,20 @@ export class World {
     log.position.set(0, spawnY, z);
     group.add(log);
 
-    // Sombra de aviso no chão: cresce enquanto o tronco se aproxima do pouso.
-    const shadowMaterial = new THREE.MeshBasicMaterial({
-      color: 0x130d08,
-      transparent: true,
-      opacity: 0.12,
-      depthWrite: false,
-    });
-    const landingShadow = new THREE.Mesh(new THREE.CircleGeometry(1, 16), shadowMaterial);
-    landingShadow.rotation.x = -Math.PI / 2;
-    landingShadow.position.set(0, 0.015, z);
-    landingShadow.scale.set(0.16, 0.16, 0.16);
-    group.add(landingShadow);
+    // Sinalização de alerta no chão: disco listrado + anel vermelho pulsante.
+    // Cresce e pisca enquanto o tronco despenca, some ao tocar o solo.
+    const alert = this.createFallingLogWarning(z);
+    group.add(alert.group);
 
     const logData = {
       type: 'rolling_log',
       screenIndex,
       mesh: log,
-      landingShadow,
+      landingShadow: alert.group,
+      alertDisc: alert.disc,
+      alertRing: alert.ring,
+      alertDiscMat: alert.discMat,
+      alertRingMat: alert.ringMat,
       z: z,
       y: spawnY,
       vy: 0,
@@ -424,11 +491,11 @@ export class World {
   }
 
   addOpeningQuicksandPit(group, screenIndex, z) {
-    const pit = createOpeningQuicksandModel(0.45);
+    const pit = createOpeningQuicksandModel(0.45, 12);
     pit.group.position.set(0, -0.45, z);
     group.add(pit.group);
-    // Abismo negro sem fim (9.0m de extensão) abaixo do tampão móvel
-    this.addBottomlessShaft(group, z, 9.2);
+    // Abismo negro sem fim (20m de extensão, como o lago do cipó) abaixo do tampão móvel
+    this.addBottomlessShaft(group, z, 20.4);
 
     const pitData = {
       type: 'disappearing_quicksand',
@@ -437,26 +504,29 @@ export class World {
       segments: pit.segments,
       numSegments: pit.segments.length,
       z: z,
-      radius: 4.5, // 9.0 meters total length - cannot be cleared with a single jump!
+      radius: 10, // 20 metros totais (como o lago do cipó) - impossível pular por cima!
       timer: Math.random() * 2.0,
       isOpen: false,
       openCount: 0,
-      phase: 'closed', // closed | opening | open | closing (zipper)
+      phase: 'closed', // closed | opening | open | closing (fecho a partir da borda do herói)
       wasOpen: false,
       rumblePlayed: false,
-      // Zipper timing (seconds). Abertura em onda entrada->saída, pausa aberta,
-      // fecho em zíper entrada->saída para surfar a onda (~7.5 m/s vs 9.0 do Harry).
-      closedDur: 2.8,
-      openingDur: 1.8,
-      openDur: 1.6,
-      closingDur: 1.2,
+      // Ciclo (segundos): pausa fechado e sólido (0.5s) -> abrindo em onda
+      // entrada->saída (2.2s) -> totalmente aberto (5.0s) -> fechando em onda
+      // a partir da borda do herói, entrada->saída (2.2s, ~9.1 m/s vs 9.0 do
+      // Harry: dá para correr junto com a onda enquanto o pit fecha).
+      // Total: 9.9s, aberto na maior parte do tempo.
+      closedDur: 0.5,
+      openingDur: 2.2,
+      openDur: 5.0,
+      closingDur: 2.2,
     };
 
     this.activeOpeningPits.push(pitData);
     this.activeHazards.push(pitData);
   }
 
-  // Zipper quicksand: encontra a seção sob a posição Z do jogador
+  // Areia movediça: encontra a seção sob a posição Z do jogador
   getQuicksandSegmentAt(pitData, z) {
     const rel = z - pitData.z; // + = lado da entrada (herói), - = lado da saída
     for (const s of pitData.segments) {
@@ -465,7 +535,7 @@ export class World {
     return null;
   }
 
-  // Zipper quicksand: a seção sob os pés está aberta?
+  // Areia movediça: a seção sob os pés está aberta?
   isQuicksandOpenAt(pitData, z) {
     if (Math.abs(z - pitData.z) >= pitData.radius) return false;
     const seg = this.getQuicksandSegmentAt(pitData, z);
@@ -491,8 +561,12 @@ export class World {
   }
 
   addCrocodileTrio(group, screenIndex, centerZ) {
-    // 3 Crocodiles positioned along the pond (X=0, spaced in Z)
-    const offsetsZ = [5, 0, -5];
+    // 3 Crocodiles spaced along the pond (X=0, spaced in Z).
+    // Cada jacaré cobre [z-1.6, z+3.9] (5.5m de costas curtas): com
+    // espaçamento 10.7 sobram vãos d'água de 5.2m entre eles — correr pelo
+    // vão mata (queda > 3m), então é preciso PULAR de um jacaré para o outro
+    // (pulo máx. 6.75m).
+    const offsetsZ = [10.7, 0, -10.7];
     offsetsZ.forEach((offset, idx) => {
       const croc = createCrocodileModel(0.32);
       const zPos = centerZ + offset;
@@ -511,7 +585,7 @@ export class World {
     });
   }
 
-  addVine(group, screenIndex, centerZ) {
+  addVine(group, screenIndex, centerZ, phaseTime = null) {
     const vine = createVineModel(32, 0.28);
     // Position pivot high up in canopy overhead
     vine.pivot.position.set(0, 10.5, centerZ);
@@ -521,7 +595,7 @@ export class World {
       screenIndex,
       vine,
       centerZ,
-      time: Math.random() * Math.PI,
+      time: phaseTime ?? Math.random() * Math.PI,
     });
   }
 
@@ -638,11 +712,19 @@ export class World {
           0,
           1,
         );
-        const shadowScale = 0.16 + fallProgress * 0.95;
+        // Sinalização pulsante: cresce com a aproximação + pisca vermelho.
+        const pulse = (Math.sin(performance.now() * 0.012) + 1) / 2;
+        const warnScale = 0.3 + fallProgress * 0.85;
         l.landingShadow.visible = true;
         l.landingShadow.position.z = l.z;
-        l.landingShadow.scale.set(shadowScale, shadowScale, shadowScale);
-        l.landingShadow.material.opacity = 0.1 + fallProgress * 0.28;
+        l.landingShadow.scale.set(warnScale, 1, warnScale);
+        if (l.alertDiscMat) l.alertDiscMat.opacity = 0.55 + fallProgress * 0.3;
+        if (l.alertRingMat) l.alertRingMat.opacity = 0.45 + pulse * 0.5;
+        if (l.alertDisc) l.alertDisc.rotation.z += delta * 1.5;
+        if (l.alertRing) {
+          const ringPulse = 1 + pulse * 0.12;
+          l.alertRing.scale.set(ringPulse, ringPulse, 1);
+        }
         if (l.y <= l.groundY) {
           l.y = l.groundY;
           l.vy = 0;
@@ -757,10 +839,11 @@ export class World {
       }
     });
 
-    // 7. Update Disappearing Quicksand Pits (Zipper cycle per section)
-    // Fases: fechado e sólido (2.8s) -> abrindo em onda da entrada até a saída
-    // (1.8s) -> totalmente aberto (1.6s) -> fechando em zíper entrada->saída
-    // (1.2s). Total: 7.4s. Cada seção parte-se ao meio (X) e afunda (Y).
+    // 7. Update Disappearing Quicksand Pits (ciclo por seção)
+    // Fases: pausa fechado e sólido (0.5s) -> abrindo em onda da entrada até
+    // a saída (2.2s) -> totalmente aberto (5.0s) -> fechando em onda a partir
+    // da borda do herói, entrada->saída (2.2s, para correr junto com a onda).
+    // Total: 9.9s. Cada seção parte-se ao meio (X) e afunda (Y).
     this.activeOpeningPits.forEach(p => {
       p.timer += delta;
       const n = p.numSegments;
@@ -796,7 +879,9 @@ export class World {
       let openCount = 0;
       p.segments.forEach((seg, i) => {
         // Instante em que esta seção deve estar aberta (alvo binário 0/1).
-        // Onda da entrada (i=0, +Z) até a saída (i=n-1, -Z) tanto a abrir como a fechar.
+        // Abertura E fecho em onda da entrada (i=0, +Z, borda do herói) até
+        // a saída (i=n-1, -Z): o fecho varre ~9.1 m/s, na mesma direção e
+        // velocidade do Harry (9.0), para atravessar correndo junto com a onda.
         const openStart = p.closedDur + (i * p.openingDur) / n;
         const closeStart = p.closedDur + p.openingDur + p.openDur + (i * p.closingDur) / n;
         const target = cycleTime >= openStart && cycleTime < closeStart ? 1 : 0;

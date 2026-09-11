@@ -128,7 +128,7 @@ export class HUD {
       // If within 15 units of a crocodile
       if (nearestCroc && minDistance < 15) {
         // Check if player is currently standing on this crocodile
-        const isStandingOnThisCroc = player.isGrounded && Math.abs(player.y - 0.35) < 0.25 && (player.z >= nearestCroc.z - 3.3 && player.z <= nearestCroc.z + 3.9);
+        const isStandingOnThisCroc = player.isGrounded && Math.abs(player.y - 0.35) < 0.25 && (player.z >= nearestCroc.z - 1.6 && player.z <= nearestCroc.z + 3.9);
 
         if (isStandingOnThisCroc) {
           if (player.z <= nearestCroc.z + 0.8) {
@@ -157,67 +157,89 @@ export class HUD {
             }
           }
         }
-      } else if (world.activeOpeningPits && world.activeOpeningPits.length > 0) {
-        // Check nearest disappearing quicksand hole
-        let nearestPit = null;
-        let minPitDist = Infinity;
-        for (const pitData of world.activeOpeningPits) {
-          const dist = Math.abs(player.z - pitData.z);
-          if (dist < minPitDist) {
-            minPitDist = dist;
-            nearestPit = pitData;
-          }
-        }
-
-        if (nearestPit && minPitDist < 14) {
-          if (nearestPit.phase === 'closing') {
-            this.crocPromptEl.className = 'hud-box croc-status safe';
-            if (this.crocTextEl) {
-              this.crocTextEl.textContent = t('hint.zipClosing');
-            }
-          } else if (nearestPit.phase === 'opening') {
-            this.crocPromptEl.className = 'hud-box croc-status danger';
-            if (this.crocTextEl) {
-              this.crocTextEl.textContent = t('hint.zipOpening');
-            }
-          } else if (nearestPit.isOpen) {
-            this.crocPromptEl.className = 'hud-box croc-status danger';
-            if (this.crocTextEl) {
-              this.crocTextEl.textContent = t('hint.zipOpen');
-            }
-          } else {
-            this.crocPromptEl.className = 'hud-box croc-status safe';
-            if (this.crocTextEl) {
-              this.crocTextEl.textContent = t('hint.zipClosed');
-            }
-          }
-        } else {
-          this.crocPromptEl.className = 'hud-box croc-status';
-        }
-      } else if (world.activeHazards && world.activeHazards.some(h => h.type === 'scorpion')) {
-        let nearestScorpion = null;
-        let minScorpionDist = Infinity;
-        for (const h of world.activeHazards) {
-          if (h.type === 'scorpion') {
-            const dist = Math.abs(player.z - h.z);
-            if (dist < minScorpionDist) {
-              minScorpionDist = dist;
-              nearestScorpion = h;
-            }
-          }
-        }
-
-        if (nearestScorpion && minScorpionDist < 14) {
-          this.crocPromptEl.className = 'hud-box croc-status danger';
-          if (this.crocTextEl) {
-            this.crocTextEl.textContent = t('hint.scorpion');
-          }
-        } else {
-          this.crocPromptEl.className = 'hud-box croc-status';
-        }
       } else {
-        this.crocPromptEl.className = 'hud-box croc-status';
-      }
+        // Sem crocodilo por perto: checa areia movediça, troncos caindo e escorpião.
+          let shown = false;
+
+          if (world.activeOpeningPits && world.activeOpeningPits.length > 0) {
+            let nearestPit = null;
+            let minPitDist = Infinity;
+            for (const pitData of world.activeOpeningPits) {
+              const dist = Math.abs(player.z - pitData.z);
+              if (dist < minPitDist) {
+                minPitDist = dist;
+                nearestPit = pitData;
+              }
+            }
+
+            if (nearestPit && minPitDist < 14) {
+              shown = true;
+              if (nearestPit.phase === 'closing') {
+                this.crocPromptEl.className = 'hud-box croc-status safe';
+                if (this.crocTextEl) {
+                  this.crocTextEl.textContent = t('hint.zipClosing');
+                }
+              } else if (nearestPit.phase === 'opening') {
+                this.crocPromptEl.className = 'hud-box croc-status danger';
+                if (this.crocTextEl) {
+                  this.crocTextEl.textContent = t('hint.zipOpening');
+                }
+              } else if (nearestPit.isOpen) {
+                this.crocPromptEl.className = 'hud-box croc-status danger';
+                if (this.crocTextEl) {
+                  this.crocTextEl.textContent = t('hint.zipOpen');
+                }
+              } else {
+                this.crocPromptEl.className = 'hud-box croc-status safe';
+                if (this.crocTextEl) {
+                  this.crocTextEl.textContent = t('hint.zipClosed');
+                }
+              }
+            }
+          }
+
+          // Troncos caindo/rolando por perto (zona de queda sinalizada no chão).
+          if (!shown && world.activeRollingLogs && world.activeRollingLogs.length > 0) {
+            let minLogDist = Infinity;
+            for (const logData of world.activeRollingLogs) {
+              const dist = Math.abs(player.z - logData.z);
+              if (dist < minLogDist) minLogDist = dist;
+            }
+            if (minLogDist < 14) {
+              shown = true;
+              this.crocPromptEl.className = 'hud-box croc-status danger';
+              if (this.crocTextEl) {
+                this.crocTextEl.textContent = t('hint.fallingLog');
+              }
+            }
+          }
+
+          if (!shown && world.activeHazards && world.activeHazards.some(h => h.type === 'scorpion')) {
+            let nearestScorpion = null;
+            let minScorpionDist = Infinity;
+            for (const h of world.activeHazards) {
+              if (h.type === 'scorpion') {
+                const dist = Math.abs(player.z - h.z);
+                if (dist < minScorpionDist) {
+                  minScorpionDist = dist;
+                  nearestScorpion = h;
+                }
+              }
+            }
+
+            if (nearestScorpion && minScorpionDist < 14) {
+              shown = true;
+              this.crocPromptEl.className = 'hud-box croc-status danger';
+              if (this.crocTextEl) {
+                this.crocTextEl.textContent = t('hint.scorpion');
+              }
+            }
+          }
+
+          if (!shown) {
+            this.crocPromptEl.className = 'hud-box croc-status';
+          }
+        }
     }
   }
 }

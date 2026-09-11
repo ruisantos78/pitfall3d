@@ -140,22 +140,22 @@ export function createCrocodileModel(voxelSize = 0.32) {
   // 1. Lower Body, Skull & Lower Jaw
   const baseVoxels = [];
 
-  // A. Skull & Body (Safe Stepping Platform behind and between the eyes: Z = -10 to 2)
-  for (let z = -10; z <= 2; z++) {
+  // A. Skull & Body (Safe Stepping Platform behind and between the eyes: Z = -5 to 2)
+  for (let z = -5; z <= 2; z++) {
     for (let x = -4; x <= 4; x++) {
       // Submerged body layers
       baseVoxels.push({ x, y: 0, z, color: C.CROC_DARK });
       baseVoxels.push({ x, y: 1, z, color: (x + z) % 2 === 0 ? C.CROC_MID : C.CROC_DARK });
 
       // Safe Stepping Platform surface (Y = 2)
-      const isRim = Math.abs(x) === 4 || z === -10;
+      const isRim = Math.abs(x) === 4 || z === -5;
       let topColor = C.CROC_MID;
 
       if (isRim) {
         topColor = C.CROC_DARK;
       } else {
         // High-visibility stepping pad: prominent golden chevron & emerald scales
-        const isCenterChevron = Math.abs(x) <= 1 && (z === -2 || z === -4 || z === -6 || z === 0);
+        const isCenterChevron = Math.abs(x) <= 1 && (z === -2 || z === -4 || z === 0);
         if (isCenterChevron) {
           topColor = C.GOLD; // Golden chevron mark indicating 100% safe eye zone!
         } else {
@@ -167,9 +167,9 @@ export function createCrocodileModel(voxelSize = 0.32) {
   }
 
   // Water ripple ring around base of crocodile
-  for (let z = -11; z <= 13; z++) {
+  for (let z = -6; z <= 13; z++) {
     for (let x = -5; x <= 5; x++) {
-      const isPerimeter = Math.abs(x) === 5 || z === -11 || z === 13;
+      const isPerimeter = Math.abs(x) === 5 || z === -6 || z === 13;
       if (isPerimeter) {
         baseVoxels.push({ x, y: 0, z, color: (x + z) % 2 === 0 ? '#1098a8' : '#20b8c8' });
       }
@@ -756,35 +756,49 @@ export function createPlayerArmsModel() {
   group.add(leftArm);
   group.add(rightArm);
 
+  // Brown grip bar held between the raised hands while swinging on a vine
+  // (matches the brown handle bar at the vine tip for the holding illusion).
+  const gripBar = new THREE.Mesh(
+    new THREE.BoxGeometry(0.56, 0.09, 0.09),
+    new THREE.MeshLambertMaterial({ color: 0x9a5c20 })
+  );
+  gripBar.position.set(0, 0.15, -0.45);
+  gripBar.visible = false;
+  group.add(gripBar);
+
   return {
     group,
     leftArm,
     rightArm,
+    gripBar,
   };
 }
 
 /**
  * Creates the iconic Atari Pitfall Disappearing Quicksand Hole (Areia Movediça que Abre e Fecha)
- * ZIPPER EDITION: o tampão é dividido em NUM_SEGMENTS seções ao longo de Z que se
- * partem ao meio (metades deslizam do centro para as laterais em X) e afundam em Y,
- * abrindo em onda da entrada (+Z, lado do herói) até a saída (-Z) e fechando na
- * mesma ordem — como um zíper — para permitir atravessar surfando a onda de fecho.
+ * LONG EDITION (20m, como o lago do cipó): o tampão é dividido em NUM_SEGMENTS
+ * seções ao longo de Z que se partem ao meio (metades deslizam do centro para
+ * as laterais em X) e afundam em Y, abrindo em onda da entrada (+Z, lado do
+ * herói) até a saída (-Z) e fechando na ordem INVERSA (saída->entrada) —
+ * o espelho da abertura.
  */
-export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 6) {
+export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12) {
   const group = new THREE.Group();
 
   // 1. Fixed Pit: paredes do poço (do chão para baixo).
   // Sem fundo de lama: o fundo é o poço negro sem fim adicionado em world.js
   // (addBottomlessShaft). Acima do chão nada muda.
   const pitVoxels = [];
+  const Z_MIN = -22;
+  const Z_MAX = 22;
 
   // Paredes verticais do poço (de Y = -2 até Y = 0, como antes)
   for (let y = -2; y <= 0; y++) {
     for (let x = -4; x <= 4; x++) {
-      pitVoxels.push({ x, y, z: -10, color: '#382010' });
-      pitVoxels.push({ x, y, z: 10, color: '#382010' });
+      pitVoxels.push({ x, y, z: Z_MIN - 1, color: '#382010' });
+      pitVoxels.push({ x, y, z: Z_MAX + 1, color: '#382010' });
     }
-    for (let z = -9; z <= 9; z++) {
+    for (let z = Z_MIN; z <= Z_MAX; z++) {
       pitVoxels.push({ x: -4, y, z, color: '#301c0c' });
       pitVoxels.push({ x: 4, y, z, color: '#301c0c' });
     }
@@ -799,10 +813,9 @@ export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 6) {
   // Geometrias com center=false (coordenadas absolutas) + offset base de -vs/2
   // para centralizar o tampão na origem do grupo.
   const baseOffset = -voxelSize / 2;
-  const Z_MIN = -9;
-  const Z_MAX = 9;
   const totalRows = Z_MAX - Z_MIN + 1;
   const segments = [];
+  const fissureHalf = Math.round(Z_MAX * 0.6);
 
   for (let s = 0; s < numSegments; s++) {
     // Seção s=0 na ENTRADA (+Z, lado do herói) até s=numSegments-1 na SAÍDA (-Z).
@@ -814,7 +827,7 @@ export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 6) {
     // Dirt trail surface matching the corridor path
     for (let z = zLo; z <= zHi; z++) {
       for (let x = -3; x <= 3; x++) {
-        const isCenter = Math.abs(x) <= 2 && Math.abs(z) <= 6;
+        const isCenter = Math.abs(x) <= 2 && Math.abs(z) <= fissureHalf;
         let col = '#9a7638';
         if (isCenter) {
           col = (x + z) % 2 === 0 ? '#7a5a22' : '#8c6828'; // Darker muddy fissure area
@@ -850,9 +863,9 @@ export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 6) {
     });
   }
 
-  // Edge warning gravel on path rim (Z = -10 and +10)
+  // Edge warning gravel on path rim (Z = ±(Z_MAX+1))
   const rimVoxels = [];
-  [-10, 10].forEach(z => {
+  [Z_MIN - 1, Z_MAX + 1].forEach(z => {
     for (let x = -3; x <= 3; x++) {
       if ((x + z) % 2 === 0) {
         rimVoxels.push({ x, y: 0, z, color: '#b8944c' });
@@ -875,7 +888,7 @@ export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 6) {
     segments,
     voxelSize,
     numSegments,
-    radiusZ: 10 * voxelSize, // 4.5m radius = 9.0m total length
+    radiusZ: (Z_MAX + 0.5) * voxelSize, // ~10.1m radius = 20m total length (como o lago do cipó)
     isOpen: false,
     timer: 0,
     currentY: 0,

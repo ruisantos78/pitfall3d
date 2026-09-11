@@ -31,6 +31,9 @@ export class Player {
     // Vine grabbing state
     this.attachedVine = null; // { vine, centerZ, time }
     this.justReleasedVineTimer = 0;
+    // Cipó que acabou de soltar: ignorado até pousar ou agarrar outro cipó
+    // (impede re-agarrar o MESMO cipó no ar após a soltura).
+    this.ignoredVine = null;
 
     // Game stats
     this.score = 2000;
@@ -191,7 +194,7 @@ export class Player {
 
     // State 1: ATTACHED TO VINE (Swinging over pit/crocodiles)
     if (this.attachedVine) {
-      this.updateAttachedVine(delta);
+      this.updateAttachedVine(delta, world);
       return;
     }
 
@@ -216,7 +219,7 @@ export class Player {
     }
 
     // Check if standing on a disappearing quicksand section opened beneath feet
-    // (zipper: cada seção abre/fecha por conta própria — só a seção sob os pés mata)
+    // (cada seção abre/fecha por conta própria — só a seção sob os pés mata)
     if (this.isGrounded && this.y <= 0.1 && world.activeOpeningPits) {
       for (const pitData of world.activeOpeningPits) {
         if (world.isQuicksandOpenAt(pitData, this.z)) {
@@ -308,6 +311,8 @@ export class Player {
         this.y = standingSurfaceY;
         this.vy = 0;
         this.isGrounded = true;
+        // Pousou: o cipó ignorado volta a ser agarrável.
+        this.ignoredVine = null;
         // Aterrissou da queda do céu do respawn: baque seco de impacto.
         if (this.respawnDrop) {
           this.respawnDrop = false;
@@ -338,8 +343,8 @@ export class Player {
         closest = c;
       }
     }
-    // Only return if player is within this specific crocodile's physical bounds (-3.3 to +3.9)
-    if (closest && z >= closest.z - 3.3 && z <= closest.z + 3.9) {
+    // Only return if player is within this specific crocodile's physical bounds (-1.6 to +3.9)
+    if (closest && z >= closest.z - 1.6 && z <= closest.z + 3.9) {
       return closest;
     }
     return null;
@@ -375,7 +380,7 @@ export class Player {
       }
     }
 
-    // Check disappearing quicksand pits (zipper holes: cada seção é solo ou abismo)
+    // Check disappearing quicksand pits (cada seção é solo ou abismo)
     if (world.activeOpeningPits) {
       for (const pitData of world.activeOpeningPits) {
         if (Math.abs(z - pitData.z) < pitData.radius) {
@@ -383,7 +388,7 @@ export class Player {
             // A seção sob os pés está aberta!
             return -10;
           } else {
-            // Seção fechada! Solo sólido, dá para correr (ou surfar o zíper)!
+            // Seção fechada! Solo sólido, dá para correr!
             return 0.0;
           }
         }
@@ -408,6 +413,9 @@ export class Player {
 
     for (const vineData of world.activeVines) {
       if (!vineData.vine.tip) continue;
+      // Nunca re-agarra o cipó que acabou de soltar (só libera ao pousar
+      // ou agarrar outro cipó): garante o espaço de voo até o próximo cipó.
+      if (vineData === this.ignoredVine) continue;
       vineData.vine.tip.getWorldPosition(tipPos);
 
       // Distance check between player hands/chest and vine tip
@@ -417,6 +425,7 @@ export class Player {
       // Grab automatically when near the vine!
       if (distZ < 1.9 && distY < 2.4) {
         this.attachedVine = vineData;
+        this.ignoredVine = null;
         this.isGrounded = false;
         this.vy = 0;
         this.vz = 0;
@@ -431,7 +440,7 @@ export class Player {
   }
 
   // Update position while swinging on the vine
-  updateAttachedVine(delta) {
+  updateAttachedVine(delta, world) {
     const v = this.attachedVine.vine;
     const tipPos = new THREE.Vector3();
     v.tip.getWorldPosition(tipPos);
@@ -439,9 +448,12 @@ export class Player {
     this.z = tipPos.z;
     this.y = Math.max(0, tipPos.y - EYE_HEIGHT);
 
-    // Single action button: RELEASE VINE!
+    // Single action button: RELEASE VINE (or transfer to the next one)!
     if (this.actionJustPressed) {
       this.actionJustPressed = false;
+      // Transferência cipó→cipó: outro cipó ao alcance? Vai direto para
+      // ele, sem voo no meio. Senão, soltura normal com impulso.
+      if (this.tryVineTransfer(world)) return;
       this.releaseVine();
       return;
     }
@@ -457,7 +469,43 @@ export class Player {
       this.arms.rightArm.position.set(0.25, 0.15, -0.45);
       this.arms.leftArm.rotation.x = Math.PI / 2.2;
       this.arms.rightArm.rotation.x = Math.PI / 2.2;
+      // Brown handle bar between the hands: illusion of holding the vine.
+      if (this.arms.gripBar) this.arms.gripBar.visible = true;
     }
+  }
+
+  // Vine-to-vine transfer: pressing jump while another vine's tip is right
+  // there swings straight onto it (no flight in between). Returns true when
+  // the transfer happened.
+  tryVineTransfer(world) {
+    if (!world || !world.activeVines) return false;
+    const tipPos = new THREE.Vector3();
+    let best = null;
+    let bestDist = Infinity;
+    for (const vineData of world.activeVines) {
+      if (vineData === this.attachedVine) continue;
+      // O cipó que acabou de soltar não vale (senão o pulo nunca solta de
+      // verdade); qualquer OUTRO cipó próximo é o "próximo cipó".
+      if (vineData === this.ignoredVine) continue;
+      if (!vineData.vine.tip) continue;
+      vineData.vine.tip.getWorldPosition(tipPos);
+      const distZ = Math.abs(this.z - tipPos.z);
+      const distY = Math.abs((this.y + EYE_HEIGHT) - tipPos.y);
+      if (distZ < 3.5 && distY < 3.0) {
+        const d = distZ + distY;
+        if (d < bestDist) {
+          bestDist = d;
+          best = vineData;
+        }
+      }
+    }
+    if (!best) return false;
+    this.ignoredVine = this.attachedVine;
+    this.attachedVine = best;
+    this.vy = 0;
+    this.vz = 0;
+    audio.playTarzanYell();
+    return true;
   }
 
   // Release vine with swing momentum
@@ -476,8 +524,16 @@ export class Player {
     }
     this.vy = 5.2; // nice jumping arc
     this.isGrounded = false;
-    this.justReleasedVineTimer = 0.9;
+    // Short re-grab lockout: long enough to clear the released vine's tip
+    // (~3.8m away at 11 m/s), short enough to allow vine-to-vine mid-air
+    // transfers on the double-vine crocodile screens.
+    this.justReleasedVineTimer = 0.35;
+    // O cipó solto fica ignorado até o pouso: o voo pós-soltura nunca
+    // re-agarra o MESMO cipó, só o próximo.
+    this.ignoredVine = this.attachedVine;
     this.attachedVine = null;
+    // Hands off the vine: hide the grip bar right away.
+    if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
 
     audio.playRelease();
 
@@ -550,6 +606,9 @@ export class Player {
   updateArmsAndCamera(delta) {
     const isMoving = Math.abs(this.vz) > 0.5;
     const isTripped = this.isTripped;
+
+    // Off the vine: hide the grip bar (only shown while swinging).
+    if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
 
     // Queda de cara: câmera rente ao chão, inclinada para baixo e sem head-bob.
     if (isTripped) {
@@ -629,6 +688,8 @@ export class Player {
     // Detach from vine if attached
     if (this.attachedVine) {
       this.attachedVine = null;
+      this.ignoredVine = null;
+      if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
       const prompt = document.getElementById('vine-prompt');
       if (prompt) prompt.classList.remove('active');
     }
@@ -645,6 +706,55 @@ export class Player {
     }
   }
 
+  // Solo seguro para respawn (puro, sem efeitos colaterais: não chama die()).
+  // Retorna false sobre água/piche/poço de saída/areia que abre e fecha.
+  isRespawnGroundSafe(world, z) {
+    for (const hazard of world.activeHazards) {
+      if (['quicksand', 'tarpit', 'water'].includes(hazard.type)) {
+        if (z <= hazard.maxZ && z >= hazard.minZ) return false;
+      } else if (hazard.type === 'log_exit_pit') {
+        if (z >= hazard.minZ - 1 && z <= hazard.maxZ + 1) return false;
+      }
+    }
+    if (world.activeOpeningPits) {
+      for (const pitData of world.activeOpeningPits) {
+        if (Math.abs(z - pitData.z) < pitData.radius + 1) return false;
+      }
+    }
+    return true;
+  }
+
+  // Distância mínima de perigos físicos (troncos parados/rolando, fogo, escorpião).
+  // Inclui a zona de queda sinalizada: tronco caindo (falling) reserva 4m.
+  isRespawnClearOfHazards(world, z) {
+    for (const hazard of world.activeHazards) {
+      if (hazard.type === 'rolling_log') {
+        if (Math.abs(z - hazard.z) < 4.0) return false;
+      } else if (hazard.type === 'log' || hazard.type === 'fire' || hazard.type === 'scorpion') {
+        if (Math.abs(z - hazard.z) < 2.8) return false;
+      }
+    }
+    return true;
+  }
+
+  // Procura um Z seguro perto da base: nunca sob um ponto de queda de tronco.
+  findSafeRespawnZ(world, baseZ, screenIndex) {
+    const screenStartZ = -screenIndex * SCREEN_LENGTH;
+    const screenEndZ = -(screenIndex + 1) * SCREEN_LENGTH;
+    const minZ = screenEndZ + 2;
+    const maxZ = Math.min(8, screenStartZ + 10);
+    const candidates = [baseZ, baseZ - 4, baseZ + 4, baseZ - 8, baseZ + 8,
+      baseZ - 12, baseZ + 12, baseZ - 16, baseZ + 16, baseZ - 20, baseZ + 20];
+    for (const c of candidates) {
+      const z = THREE.MathUtils.clamp(c, minZ, maxZ);
+      if (this.isRespawnGroundSafe(world, z) && this.isRespawnClearOfHazards(world, z)) {
+        return z;
+      }
+    }
+    // Fallback: fica na base mesmo se tudo estiver ocupado (evita travar o jogo).
+    return THREE.MathUtils.clamp(baseZ, minZ, maxZ);
+  }
+
   respawn(world = null) {
     this.isDying = false;
     this.vy = 0;
@@ -658,7 +768,10 @@ export class Player {
     if (world) {
       const screenIndex = Math.max(0, Math.floor(-this.z / SCREEN_LENGTH));
       const screenStartZ = -screenIndex * SCREEN_LENGTH;
-      this.z = screenStartZ + 6;
+      const baseZ = screenStartZ + 6;
+      // Desvia de pontos de queda de troncos e demais perigos: nunca nasce
+      // embaixo de um tronco caindo/rolando nem sobre poços/areia movediça.
+      this.z = this.findSafeRespawnZ(world, baseZ, screenIndex);
     } else {
       // Fallback: recua 8 unidades
       this.z += 8;
@@ -705,6 +818,8 @@ export class Player {
     this.deathTimer = 0;
     this.deathReasonKey = 'death.lifeLost';
     this.attachedVine = null;
+    this.ignoredVine = null;
+    if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
     this.tripCooldown = 0;
     this.isTripped = false;
     this.tripStandTimer = 0;

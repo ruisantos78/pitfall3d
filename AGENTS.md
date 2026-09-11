@@ -33,10 +33,11 @@ Any agent modifying this code **MUST PRESERVE** these guidelines:
 5. **Legendary Immunity on the Crocodile's Eyes:**
    - In the original Atari 2600, standing on the crocodile's eyes/top of the head makes Harry 100% immune to bites, even with its mouth wide open.
    - In code: if `z <= croc.z + 0.8`, the player is on the eyes/skull and **MUST NEVER DIE** when the mouth opens. Only the front snout area (`z > croc.z + 0.8`) is dangerous when open.
-6. **Long Moving Quicksand (9.0 Meters):**
-   - The opening/closing quicksand hole is **9.0 meters long** (`radius = 4.5`).
+   - User-facing texts (HUD/menu/death in `i18n.js`) call this safe zone the croc's **back** (`costas`, never `olhos`/`eyes`), per explicit user request.
+6. **Long Moving Quicksand (20 Meters, Vine-Pit Size):**
+   - The opening/closing quicksand hole is **20 meters long** (`radius = 10`), same size as the vine lake.
    - The player's max running jump is **6.75 meters**. Therefore it is **physically impossible to jump over it when open**.
-   - Correct crossing requires waiting for the ground to close and sprinting across the solid floor.
+   - Correct crossing is surfing the closing wave: it sweeps entry→exit from the hero's edge at ~9.1 m/s (same direction and pace as Harry at `RUN_SPEED = 9.0`), so the player runs along with it while the pit closes beneath their feet. The pit stays open most of the 9.9s cycle; the fully-closed pause is only 0.5s.
 7. **Open Treasure Count (No 32 Cap):**
    - In the Atari 2600 classic there were 32 treasures spread across underground and surface screens.
    - In the continuous procedurally generated 3D game, the player can explore indefinitely and rescue **more than 32 treasures**.
@@ -82,43 +83,45 @@ pitfall/
   - The player starts at `z = 0` and **advances toward negative `Z`** (`vz < 0`).
   - Therefore: more negative coordinates are **ahead**; more positive coordinates are **behind**.
 - **Critical Functions:**
-  - `getCrocodileAt(world, z)`: Locates the specific crocodile under the player's feet within the extended range `[-3.3, +3.9]`.
+  - `getCrocodileAt(world, z)`: Locates the specific crocodile under the player's feet within the extended range `[-1.6, +3.9]`.
   - `getSurfaceElevation(world, z)`: Returns ground elevation (`0.0`), crocodile top (`0.35`) or abyss (`-10.0`).
   - `checkVineGrab(world)`: Detects proximity to the vine tip and anchors the player.
-  - `releaseVine()`: Releases the vine with parabolic momentum.
+  - `releaseVine()`: Releases the vine with parabolic momentum. The released vine is stored in `ignoredVine` and skipped by `checkVineGrab` until landing or grabbing another vine (never re-grabs the SAME vine mid-flight; enables vine-to-vine transfers).
+  - `tryVineTransfer(world)`: On jump press while swinging, if another vine tip is within (`3.5`, `3.0`), hops straight onto it (press-to-transfer); otherwise falls back to `releaseVine()` flight.
   - `die(reasonKey)`: takes a DICTIONARY KEY (`death.*` in `i18n.js`), never literal text; translated only in `triggerGameOver()` via `t()`. Fires `audio.playLifeLost()` when lives remain (`lives > 0`) and `audio.playGameOver()` on the last life, triggering the game-over screen.
 
 #### [`src/world.js`](file:///home/ruisantos/Projects/pitfall/src/world.js)
 - **Global Ground Surface Leveling:**
   - The central dirt mesh (`groundMesh`) uses blocks of height `1.0` positioned at `Y = -1.0`, ensuring the trail's top surface sits exactly at **`Y = 0.00`**.
   - This perfectly aligns the trail with the side borders (`leftBorder`, `rightBorder`), Harry's feet elevation (`standingSurfaceY = 0.00`) and the quicksand lid.
+  - **X-symmetry:** `createVoxelGeometry` with `center = false` maps voxel `x` to `[x·vs, (x+1)·vs]`, so columns `-4..4` span `[-4, +5]`. `groundMesh` is therefore offset by `X = -0.5` for a symmetric strip `[-4.5, +4.5]` (two green edge lines per side), and the side borders sit at `X = ±12.5` (butt joints at `±4.5`, no coplanar overlap/z-fighting).
 - **Screen Dimensions:**
   - Each screen is `SCREEN_LENGTH = 60` meters long on the `Z` axis.
   - `startZ = -index * 60`, `endZ = -(index + 1) * 60`.
 - **Classic Screen Sequence:**
   - `START_TRAIL` (intro log)
   - `STATIONARY_LOGS` (two logs)
-  - `DISAPPEARING_QUICKSAND` (9m moving quicksand)
+  - `DISAPPEARING_QUICKSAND` (20m moving quicksand)
   - `QUICKSAND_VINE` (20m blue lake with vine — vine-only crossing)
   - `ROLLING_LOGS` (rolling logs)
-  - `CROCODILE_POND` (pond with 3 crocodiles spaced at `[5, 0, -5]`)
+  - `CROCODILE_POND` (32m pond with 3 crocodiles spaced at `[10.7, 0, -10.7]` — 5.2m water gaps between them force jumps from one croc to the next)
   - `QUICKSAND_AND_LOG` (moving quicksand + rolling log)
   - `CAMPFIRE_TREASURE` (campfires with dynamic flames)
   - `TAR_PIT_VINE` (tar pit with vine)
   - `SCORPION_RUN` (crawling scorpions)
-  - `CROCODILE_VINE` (crocodile pond + hanging vine)
+  - `CROCODILE_VINE` (32m crocodile pond + two anti-phase hanging vines at `+13`/`-2`: pressing jump at the forward extreme transfers straight onto the next vine, no flight in between)
 - **Dynamic Updates (`world.update(delta)`):**
   - Vine swing animation (`v.vine.pivot.rotation.x`).
   - 4.4s crocodile mouth cycle (closed, orange-eyed alert, red open, snap shut).
-  - 7.4s quicksand zipper cycle (closed and solid for 2.8s, entry→exit opening wave for 1.8s, fully open for 1.6s, surfable entry→exit zipper close for 1.2s).
+  - 9.9s quicksand cycle (fully closed pause for 0.5s, entry→exit opening wave for 2.2s, fully open for 5.0s, entry→exit closing wave from the hero's edge for 2.2s, surfable at ~9.1 m/s vs Harry's 9.0).
 
 #### [`src/models.js`](file:///home/ruisantos/Projects/pitfall/src/models.js)
-- `createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 6)`:
+- `createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12)`:
   - Fixed pit walls at `Y = -2..0`; bottom is the endless black shaft (`addBottomlessShaft`).
-  - Lid split into 6 sections along `Z`: each section splits in half (halves slide from center to the sides on `X`) and sinks on `Y` as `openAmount` goes 0→1, with tremor while moving. Physics (`isQuicksandOpenAt`) and cycle are per-section.
+  - Lid split into 12 sections along `Z`: each section splits in half (halves slide from center to the sides on `X`) and sinks on `Y` as `openAmount` goes 0→1, with tremor while moving. Physics (`isQuicksandOpenAt`) and cycle are per-section.
 - `createCrocodileModel(voxelSize = 0.32)`:
   - Head/eyes at `Z = 0`.
-  - Safe platform on scales and golden chevrons from `Z = -10` to `+2` (`z <= croc.z + 0.8`).
+  - Safe platform on scales and golden chevrons from `Z = -5` to `+2` (`z <= croc.z + 0.8`).
   - Articulated jaw from `Z = 3` to `12` with X-axis rotation and sharp teeth.
 - `createLogModel(voxelSize = 0.18)`:
   - Log cylinder 0.90m in diameter (0.45m radius) and 3.06m wide.
@@ -168,7 +171,7 @@ pitfall/
   - `playSink()`: two low steps 80→140Hz (~0.4s, pit fall).
   - `playLifeLost()` & `playGameOver()`: original death jingle 140→80→140→100Hz (~2.1s).
   - `playChomp()` & `playCrocSnap()`: filtered white noise for bite and fang snap.
-  - `playQuicksandRumble()`, `playGroundThud()`: original effects for the zipper quicksand.
+  - `playQuicksandRumble()`, `playGroundThud()`: original effects for the opening quicksand.
 
 ---
 
