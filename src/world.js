@@ -15,6 +15,7 @@ import { audio } from './audio.js';
 
 export const SCREEN_LENGTH = 60; // Length of each screen along Z axis
 export const PATH_WIDTH = 8;     // Width of corridor
+export const TUNNEL_FLOOR_Y = -8; // Underground tunnel floor (ladder screens)
 
 export class World {
   constructor(scene) {
@@ -42,6 +43,11 @@ export class World {
 
     // Poço sem fim: material preto visto por dentro (paredes do abismo)
     this.abyssMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide });
+
+    // Subterrâneo: terra das paredes do túnel e madeira da escada
+    this.tunnelWallMaterial = new THREE.MeshLambertMaterial({ color: 0x4a3826 });
+    this.tunnelFloorMaterial = new THREE.MeshLambertMaterial({ color: 0x5a4128 });
+    this.ladderMaterial = new THREE.MeshLambertMaterial({ color: 0x8a6a3a });
   }
 
   // Poço sem fim: tubo preto profundo sem tampa para parecer abismo infinito
@@ -138,11 +144,12 @@ export class World {
     return ((r << 1) & 0xff) | (b3 ^ b4 ^ b5 ^ b7);
   }
 
-  // Screen N (N>=1) = seed stepped (N-1) times right. Index 0 stays tutorial.
+  // Screen N = LFSR stepped (N mod 255) times right from seed $C4.
+  // Só existem 255 fases: a 256ª é a 1ª de novo (loop para frente).
   getAuthenticSpec(index) {
-    if (index <= 0) return null;
+    const n = ((index % 255) + 255) % 255;
     let r = 0xc4;
-    for (let i = 1; i < index; i++) r = World.lfsrRight(r);
+    for (let i = 0; i < n; i++) r = World.lfsrRight(r);
     const objectType = r & 0x07;
     const sceneType = (r >> 3) & 0x07;
     const treePat = (r >> 6) & 0x03;
@@ -151,7 +158,6 @@ export class World {
 
   // Deterministic Pitfall 2600 screen sequence (hybrid authentic+)
   getScreenType(index) {
-    if (index === 0) return 'START_TRAIL'; // Introductory easy trail
     const spec = this.getAuthenticSpec(index);
     // Cena 4 (jacarés): metade com cipó, metade só com jacarés (decide pelo
     // treePat do LFSR — determinístico, o mapa nunca muda).
@@ -203,10 +209,10 @@ export class World {
 
     // Build Ground Voxel Strips
     // If screen has a pit/pond in the middle, create a gap in ground
-    const hasCentralHazard = ['QUICKSAND_VINE', 'TAR_PIT_VINE', 'CROCODILE_VINE', 'CROCODILE_POND', 'QUICKSAND_VINE_OPEN', 'BLUE_QUICKSAND', 'HOLE_SINGLE'].includes(screenType);
+    const hasCentralHazard = ['QUICKSAND_VINE', 'TAR_PIT_VINE', 'CROCODILE_VINE', 'CROCODILE_POND', 'QUICKSAND_VINE_OPEN', 'BLUE_QUICKSAND'].includes(screenType);
     // Meio-comprimento do lago central: 8m no lago dos jacarés (16m,
     // cruzável só com o cipó) e 10m no lago do cipó e no piche (20m).
-    const centralHazardHalf = ['CROCODILE_VINE', 'CROCODILE_POND'].includes(screenType) ? 8 : (screenType === 'HOLE_SINGLE' ? 3 : 10);
+    const centralHazardHalf = ['CROCODILE_VINE', 'CROCODILE_POND'].includes(screenType) ? 8 : 10;
     const hazardStartZ = (startZ + endZ) / 2 + centralHazardHalf;
     const hazardEndZ = (startZ + endZ) / 2 - centralHazardHalf;
 
@@ -215,7 +221,7 @@ export class World {
     const pitCenterZ = midZ;
     // Poço azul de saída dos troncos (1 fileira, ~1.5m). Só nas telas com
     // rolling logs do mapa superior (obj 0..3, scene != 5).
-    const specForGround = index === 0 ? null : this.getAuthenticSpec(index);
+    const specForGround = this.getAuthenticSpec(index);
     const hasLogExitPit = !!specForGround && specForGround.sceneType !== 5 && specForGround.objectType <= 3;
     const logExitPitCenterZ = startZ - 0.75;
 
@@ -229,9 +235,10 @@ export class World {
       const worldZ = startZ - z;
       const isOverHazard = hasCentralHazard && (worldZ <= hazardStartZ && worldZ >= hazardEndZ);
       const isOverDisappearingPit = hasDisappearingPit && Math.abs(worldZ - pitCenterZ) <= 10.2;
-      // Authentic triple holes: three 4m pits at midZ+12 / midZ / midZ-12
-      const isOverTripleHole = screenType === 'HOLE_TRIPLE' &&
-        (Math.abs(worldZ - (midZ + 12)) <= 2.2 || Math.abs(worldZ - midZ) <= 2.2 || Math.abs(worldZ - (midZ - 12)) <= 2.2);
+      // Shafts com escada (subterrâneo): 1 de 4m ou 3 de 3m
+      const isOverShaft = (screenType === 'HOLE_SINGLE' && Math.abs(worldZ - midZ) <= 2.2) ||
+        (screenType === 'HOLE_TRIPLE' &&
+          (Math.abs(worldZ - (midZ + 12)) <= 1.7 || Math.abs(worldZ - midZ) <= 1.7 || Math.abs(worldZ - (midZ - 12)) <= 1.7));
       // Saída dos troncos: 1 fileira em TODA a largura (inclusive o verde)
       const isOverLogExit = hasLogExitPit && Math.abs(worldZ - logExitPitCenterZ) <= 0.8;
       if (isOverLogExit) continue;
@@ -240,7 +247,7 @@ export class World {
       // sempre visível nos demais pits — só o caminho central abre buraco.
       for (let x = -4; x <= 4; x++) {
         const isEdge = Math.abs(x) >= 3;
-        if (!isEdge && (isOverHazard || isOverDisappearingPit || isOverTripleHole)) continue;
+        if (!isEdge && (isOverHazard || isOverDisappearingPit || isOverShaft)) continue;
 
           let col = isEdge ? ((x + z) % 2 === 0 ? grassBorderColor : grassColor) : (((x + z) % 3 === 0) ? pathShade : pathColor);
           groundVoxels.push({ x, y: 0, z: -z, color: col });
@@ -275,13 +282,6 @@ export class World {
   }
 
   buildScreenFeatures(group, index, startZ, endZ, midZ, type) {
-    if (type === 'START_TRAIL') {
-      // Safe starting area with one stationary log to learn jumping
-      this.addStationaryLog(group, index, midZ - 5);
-      this.addTreasure(group, index, midZ - 18, 'gold');
-      return;
-    }
-
     // Authentic spec from pitfall.asm LFSR (seed $C4, stepped right)
     const spec = this.getAuthenticSpec(index) || { objectType: 4, sceneType: 0, treePat: 0 };
     const obj = spec.objectType;
@@ -289,9 +289,9 @@ export class World {
     const treasureKinds = ['money', 'silver', 'gold', 'diamond'];
 
     // Overlay ground object — SOMENTE mapa superior (pitfall.asm bits 0..2).
-    // Subterrâneo (escada/parede/escorpião de scene 0-1) omitido por enquanto.
+    // O subterrâneo (túnel + escorpião) das scenes 0-1 é construído à parte.
     // obj 7 = cobra da superfície: sem modelo próprio ainda, então não
-    // spawna nada (o modelo de escorpião é exclusivo do subterrâneo).
+    // spawna nada (o escorpião mora no túnel).
     // Troncos rolantes: pontos fixos e determinísticos em vagas sólidas
     // (nunca no meio de lagos/buracos), sem aleatoriedade.
     const addOverlayObject = (z) => {
@@ -315,14 +315,17 @@ export class World {
 
     switch (type) {
       case 'HOLE_SINGLE':
-        // Original: one jumpable hole (ladder/wall underground omitted in FPS).
-        this.addTarPit(group, index, midZ, 6);
+        // Original: buraco com escada para o subterrâneo. Entre a pé para
+        // descer, pule por cima para continuar em cima.
+        this.addLadderShaft(group, index, midZ, 2);
+        this.addTunnel(group, index, startZ, endZ, [{ centerZ: midZ, half: 2 }]);
         addOverlayObject(midZ + 14);
         break;
 
       case 'HOLE_TRIPLE':
-        // Original: three jumpable holes.
-        [12, 0, -12].forEach((off) => this.addTarPit(group, index, midZ + off, 4));
+        // Original: três buracos com escada.
+        [12, 0, -12].forEach((off) => this.addLadderShaft(group, index, midZ + off, 1.5));
+        this.addTunnel(group, index, startZ, endZ, [12, 0, -12].map((off) => ({ centerZ: midZ + off, half: 1.5 })));
         addOverlayObject(midZ + 20);
         break;
 
@@ -597,6 +600,17 @@ export class World {
     group.add(pitMesh);
     this.addBottomlessShaft(group, centerZ, length, pitWidth);
 
+    // Espetos no fundo: deixam claro que ali não se deve entrar.
+    if (!this.spikeMaterial) {
+      this.spikeMaterial = new THREE.MeshLambertMaterial({ color: 0x9aa0a8 });
+    }
+    const spikeGeo = new THREE.ConeGeometry(0.32, 2.0, 6);
+    for (let x = -4; x <= 4; x += 1) {
+      const spike = new THREE.Mesh(spikeGeo, this.spikeMaterial);
+      spike.position.set(x, -1.5, centerZ);
+      group.add(spike);
+    }
+
     this.activeHazards.push({
       type: 'log_exit_pit',
       screenIndex,
@@ -604,6 +618,106 @@ export class World {
       maxZ: startZ,
       centerZ,
     });
+  }
+
+  // Poço com escada para o subterrâneo (telas HOLE_*): paredes de terra do
+  // nível 0 até o túnel + escada de madeira na parede de saída (-Z).
+  addLadderShaft(group, screenIndex, centerZ, half) {
+    const top = 0.2;
+    const bottom = TUNNEL_FLOOR_Y;
+    const h = top - bottom;
+    const midY = (top + bottom) / 2;
+
+    const sideGeo = new THREE.BoxGeometry(0.5, h, half * 2 + 0.5);
+    for (const x of [-2.75, 2.75]) {
+      const wall = new THREE.Mesh(sideGeo, this.tunnelWallMaterial);
+      wall.position.set(x, midY, centerZ);
+      group.add(wall);
+    }
+    const endGeo = new THREE.BoxGeometry(6.0, h, 0.5);
+    for (const z of [centerZ - half - 0.25, centerZ + half + 0.25]) {
+      const wall = new THREE.Mesh(endGeo, this.tunnelWallMaterial);
+      wall.position.set(0, midY, z);
+      group.add(wall);
+    }
+
+    // Escada: 2 trilhos + degraus na parede de saída
+    const railGeo = new THREE.BoxGeometry(0.12, h - 0.5, 0.12);
+    const rungGeo = new THREE.BoxGeometry(1.0, 0.09, 0.09);
+    const ladderZ = centerZ - half + 0.45;
+    for (const x of [-0.5, 0.5]) {
+      const rail = new THREE.Mesh(railGeo, this.ladderMaterial);
+      rail.position.set(x, midY, ladderZ);
+      group.add(rail);
+    }
+    for (let y = -0.5; y >= TUNNEL_FLOOR_Y + 0.6; y -= 0.8) {
+      const rung = new THREE.Mesh(rungGeo, this.ladderMaterial);
+      rung.position.set(0, y, ladderZ);
+      group.add(rung);
+    }
+
+    this.activeHazards.push({
+      type: 'ladder_shaft',
+      screenIndex,
+      minZ: centerZ - half,
+      maxZ: centerZ + half,
+      centerZ,
+      half,
+    });
+  }
+
+  // Túnel subterrâneo de ponta a ponta da tela: chão, paredes laterais,
+  // paredes de topo (sem passagem para telas vizinhas), luz e escorpião.
+  // `shafts` = [{centerZ, half}] dos poços com escada: o escorpião patrulha
+  // o maior trecho livre — NUNCA anda embaixo de saída de escada.
+  addTunnel(group, screenIndex, startZ, endZ, shafts = []) {
+    const midZ = (startZ + endZ) / 2;
+    const length = SCREEN_LENGTH;
+
+    const floor = new THREE.Mesh(
+      new THREE.BoxGeometry(PATH_WIDTH + 1, 0.5, length),
+      this.tunnelFloorMaterial
+    );
+    floor.position.set(0, TUNNEL_FLOOR_Y - 0.25, midZ);
+    group.add(floor);
+
+    const sideGeo = new THREE.BoxGeometry(0.5, 8, length);
+    for (const x of [-4.75, 4.75]) {
+      const wall = new THREE.Mesh(sideGeo, this.tunnelWallMaterial);
+      wall.position.set(x, TUNNEL_FLOOR_Y + 4, midZ);
+      group.add(wall);
+    }
+
+    const endGeo = new THREE.BoxGeometry(PATH_WIDTH + 1.5, 8, 0.5);
+    for (const z of [startZ - 0.3, endZ + 0.3]) {
+      const wall = new THREE.Mesh(endGeo, this.tunnelWallMaterial);
+      wall.position.set(0, TUNNEL_FLOOR_Y + 4, z);
+      group.add(wall);
+    }
+
+    const lamp = new THREE.PointLight(0xffb060, 25, 50);
+    lamp.position.set(0, TUNNEL_FLOOR_Y + 3.5, midZ);
+    group.add(lamp);
+
+    // Maior intervalo do túnel livre de poços (margem 2m de cada lado)
+    const lo = endZ + 3;
+    const hi = startZ - 3;
+    const blocks = shafts
+      .map((s) => [s.centerZ - s.half - 2, s.centerZ + s.half + 2])
+      .sort((a, b) => a[0] - b[0]);
+    let bestLo = lo;
+    let bestHi = lo;
+    let cur = lo;
+    for (const [b0, b1] of [...blocks, [hi, hi]]) {
+      if (b0 - cur > bestHi - bestLo) {
+        bestLo = cur;
+        bestHi = b0;
+      }
+      cur = Math.max(cur, b1);
+    }
+    const patrolBase = (bestLo + bestHi) / 2;
+    const patrolRange = Math.max(1.5, Math.min(12, (bestHi - bestLo) / 2 - 1));
+    this.addScorpion(group, screenIndex, patrolBase, TUNNEL_FLOOR_Y + 0.08, patrolRange);
   }
 
   addTarPit(group, screenIndex, centerZ, length = 20) {
@@ -753,9 +867,9 @@ export class World {
     });
   }
 
-  addScorpion(group, screenIndex, z) {
+  addScorpion(group, screenIndex, z, groundY = 0.08, patrolRange = 3) {
     const scorpion = createScorpionModel(0.28);
-    scorpion.position.set(0, 0.08, z);
+    scorpion.position.set(0, groundY, z);
     group.add(scorpion);
 
     this.activeHazards.push({
@@ -763,6 +877,8 @@ export class World {
       screenIndex,
       mesh: scorpion,
       baseZ: z,
+      baseY: groundY,
+      patrolRange,
       time: 0,
       radius: 1.2,
     });
@@ -972,14 +1088,15 @@ export class World {
 
     // 5. Update Scorpions (scuttle back and forth along trail with step bounce & light pulse)
     this.activeHazards.filter(h => h.type === 'scorpion').forEach(s => {
-      s.time += delta * 2.5;
-      s.mesh.position.z = s.baseZ + Math.sin(s.time) * 3;
+      // Patrulha lenta e constante (~2.2 m/s no pico): dá tempo de pular por cima
+      s.time += delta * (2.2 / (s.patrolRange || 3));
+      s.mesh.position.z = s.baseZ + Math.sin(s.time) * (s.patrolRange || 3);
       s.z = s.mesh.position.z;
       s.mesh.rotation.y = Math.cos(s.time) >= 0 ? 0 : Math.PI;
 
       // Arachnid scuttle wobble and slight step bounce above the ground
       s.mesh.rotation.z = Math.sin(s.time * 12) * 0.04;
-      s.mesh.position.y = 0.08 + Math.abs(Math.sin(s.time * 12)) * 0.03;
+      s.mesh.position.y = (s.baseY ?? 0.08) + Math.abs(Math.sin(s.time * 12)) * 0.03;
 
       if (s.mesh.userData && s.mesh.userData.light) {
         s.mesh.userData.light.intensity = 1.4 + Math.sin(s.time * 8) * 0.5;

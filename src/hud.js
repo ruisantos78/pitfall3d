@@ -83,9 +83,10 @@ export class HUD {
       this.livesEl.innerHTML = iconsHtml;
     }
 
-    // 4. Screen Number
+    // 4. Screen Number (fase 001..255 em loop)
     if (this.screenEl) {
-      this.screenEl.textContent = String(currentScreenIndex + 1).padStart(3, '0');
+      const phase = ((currentScreenIndex % 255) + 255) % 255 + 1;
+      this.screenEl.textContent = String(phase).padStart(3, '0');
     }
 
     // 5. Treasures
@@ -219,6 +220,9 @@ export class HUD {
             let minScorpionDist = Infinity;
             for (const h of world.activeHazards) {
               if (h.type === 'scorpion') {
+                // Só avisa escorpião do mesmo nível (túnel ou superfície)
+                const hy = h.baseY ?? 0.08;
+                if (Math.abs(player.y - hy) > 3) continue;
                 const dist = Math.abs(player.z - h.z);
                 if (dist < minScorpionDist) {
                   minScorpionDist = dist;

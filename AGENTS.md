@@ -84,6 +84,8 @@ pitfall/
   - Therefore: more negative coordinates are **ahead**; more positive coordinates are **behind**.
 - **Critical Functions:**
   - `getCrocodileAt(world, z)`: Locates the specific crocodile under the player's feet within the extended range `[-1.2, +2.8]`.
+  - `getLadderShaftAt(world, z, margin)`: Finds the ladder shaft containing `z`.
+  - Climbing state machine (`climbing: null|'down'|'up'`, `CLIMB_SPEED = 7.0`, 1s `climbGrace`): skips vine grabs and collisions while on the ladder.
   - `getSurfaceElevation(world, z)`: Returns ground elevation (`0.0`), crocodile top (`0.35`) or abyss (`-10.0`).
   - `checkVineGrab(world)`: Detects proximity to the vine tip and anchors the player.
   - `releaseVine()`: Releases the vine with parabolic momentum. The released vine is stored in `ignoredVine` and skipped by `checkVineGrab` until landing or grabbing another vine (never re-grabs the SAME vine mid-flight; enables vine-to-vine transfers).
@@ -98,17 +100,22 @@ pitfall/
 - **Screen Dimensions:**
   - Each screen is `SCREEN_LENGTH = 60` meters long on the `Z` axis.
   - `startZ = -index * 60`, `endZ = -(index + 1) * 60`.
-- **Classic Screen Sequence:**
-  - `START_TRAIL` (intro log)
-  - `STATIONARY_LOGS` (two logs)
+- **Authentic 255-Screen Loop (from `pitfall.asm`):**
+  - Only the 255 original screens exist: `getAuthenticSpec(index)` steps the bidirectional LFSR (`seed $C4`, right-step `(r<<1)|(b3^b4^b5^b7)`) `(index mod 255)` times, so screen 255 wraps back to phase 1 — forward-only travel, seamless loop.
+  - Bits decode exactly like the original: `0..2` ground object, `3..5` scene (`0` single hole, `1` triple holes, `2` tar pit, `3` blue swamp, `4` crocs, `5` treasure quicksand, `6` quicksand+vine, `7` blue quicksand), `6..7` tree pattern. Scene 4 splits by `treePat` parity: `CROCODILE_VINE` (vine crossing) vs `CROCODILE_POND` (croc-hopping only).
+  - HUD shows the looping phase number (`001`..`255`).
+- **Underground (ladder scenes `HOLE_SINGLE`/`HOLE_TRIPLE`):**
+  - Surface holes are ladder shafts (`addLadderShaft`: dirt walls `0..-8`, wooden ladder on the exit wall). Walking in (grounded) auto-grabs and climbs down at 7 m/s; jumping over avoids it; shafts never kill.
+  - Each ladder screen has a full 60m tunnel (`addTunnel`: floor at `TUNNEL_FLOOR_Y = -8`, side/end dirt walls, warm `PointLight`, one slow patrolling scorpion (~2.2 m/s) confined to the largest shaft-free stretch — never under a ladder exit). End walls block passage to neighbor screens (deviation from the original's connected tunnels).
+  - Controls: `SPACE` under a shaft while grounded climbs back up (1s anti-regrab grace on exit). No vines below; scorpion kills only on the same level (`|dy| < 0.9`); death respawns at the surface checkpoint.
+- **Classic Screen Sequence (all LFSR-driven, no invented loop):**
+  - `HOLE_SINGLE` / `HOLE_TRIPLE` (ladder shafts + tunnel, see above)
   - `DISAPPEARING_QUICKSAND` (20m moving quicksand)
   - `QUICKSAND_VINE` (20m blue lake with vine — vine-only crossing)
-  - `ROLLING_LOGS` (rolling logs)
+  - Rolling logs (1/2/3 from `obj 0..3`, single drop point + blue exit pit)
   - `CROCODILE_VINE` (16m crocodile pond with 3 small crocodiles at `[5.5, -1.0, -7.5]` (6.5m spacing, jumpable nose-to-nose) + one vine at `+3`: the whole pond can be crossed vine-only, crocs are the backup path)
-  - `QUICKSAND_AND_LOG` (moving quicksand + rolling log)
-  - `CAMPFIRE_TREASURE` (campfires with dynamic flames)
-  - `TAR_PIT_VINE` (tar pit with vine)
-  - `SCORPION_RUN` (crawling scorpions)
+  - `CROCODILE_POND` (same pond, no vine — croc-hopping only)
+  - Campfires, stationary logs, treasures (surface overlays from `obj 4..6` + scene 5)
 - **Dynamic Updates (`world.update(delta)`):**
   - Vine swing animation (`v.vine.pivot.rotation.x`).
   - 4.4s crocodile mouth cycle (closed, orange-eyed alert, red open, snap shut).
