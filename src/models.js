@@ -788,7 +788,7 @@ export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12) 
   const baseOffset = -voxelSize / 2;
 
   // 1. Fixed Pit: pit walls (hidden below the surface to avoid edges).
-  // No mud bottom: the bottom is the endless black shaft added in world.js
+  // No mud bottom: the opening reveals the dark space below the moving lid.
   const pitVoxels = [];
   const Z_MIN = -22;
   const Z_MAX = 22;

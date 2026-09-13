@@ -425,6 +425,8 @@ export class Player {
         // so it does not stick to the edge — physics takes over the fall from there).
         // Like the original, dropping down costs 100 points.
         this.isGrounded = false;
+        this.z = drop.centerZ;
+        this.vz = 0;
         this.y = -0.35;
         this.vy = -2;
         this.score = Math.max(0, this.score - 100);
@@ -534,7 +536,14 @@ export class Player {
               return 0.35;
             }
           }
-          // No surface under feet -> drops into pit / water
+          // Water and tar are lethal on contact; no physical shaft is needed.
+          if (hazard.type === 'tarpit' || (hazard.type === 'water' && this.y <= 0.35)) {
+            if (!DEBUG_GOD_MODE && this.y <= 0.35) {
+              audio.playSink();
+              this.die('death.abyss');
+            }
+          }
+          // No surface under feet for airborne movement.
           return -10;
         }
       }

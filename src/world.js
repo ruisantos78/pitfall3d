@@ -39,37 +39,16 @@ export class World {
       transparent: true,
       opacity: 0.85,
     });
-    this.pitMaterial = new THREE.MeshBasicMaterial({ color: 0x181818 });
+    this.pitMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
 
     // Shared tree template for cloning
     this.treeTemplate = createTreeModel(0.5);
-
-    // Bottomless pit: black material seen from inside (walls of the abyss)
-    this.abyssMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide });
 
     // Underground: dirt for tunnel walls and wood for the ladder
     this.tunnelWallMaterial = new THREE.MeshLambertMaterial({ color: 0x4a3826 });
     this.tunnelFloorMaterial = new THREE.MeshLambertMaterial({ color: 0x5a4128 });
     this.caveCeilMaterial = new THREE.MeshLambertMaterial({ color: 0x2e2418 });
     this.ladderMaterial = new THREE.MeshLambertMaterial({ color: 0x8a6a3a });
-  }
-
-  // Surface shaft: short black tube with a bottom (2.5m) to look deep
-  // - purposely shallow to NOT intersect the continuous tunnel below.
-  addBottomlessShaft(group, centerZ, length, width = PATH_WIDTH) {
-    const depth = 2.5;
-    const shaftGeo = new THREE.BoxGeometry(width, depth, length);
-    const shaft = new THREE.Mesh(shaftGeo, this.abyssMaterial);
-    // Open top just below the ground (y=-0.5), bottom at -3.0
-    shaft.position.set(0, -0.5 - depth / 2, centerZ);
-    group.add(shaft);
-    // Absolute black bottom so the sky/fog is not visible below
-    const bottomGeo = new THREE.PlaneGeometry(width, length);
-    const bottomMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-    const bottom = new THREE.Mesh(bottomGeo, bottomMat);
-    bottom.rotation.x = -Math.PI / 2;
-    bottom.position.set(0, -0.5 - depth, centerZ);
-    group.add(bottom);
   }
 
   // Generate or get screen at index (0, 1, 2, ...)
@@ -607,8 +586,6 @@ export class World {
     const pitMesh = new THREE.Mesh(pitGeo, this.pitMaterial);
     pitMesh.position.set(0, -0.6, centerZ);
     group.add(pitMesh);
-    this.addBottomlessShaft(group, centerZ, length, pitWidth);
-
     // Spikes at the bottom: make it clear this area is not to be entered.
     if (!this.spikeMaterial) {
       this.spikeMaterial = new THREE.MeshLambertMaterial({ color: 0x9aa0a8 });
@@ -773,12 +750,11 @@ export class World {
   }
 
   addTarPit(group, screenIndex, centerZ, length = 20) {
-    const pitGeo = new THREE.BoxGeometry(PATH_WIDTH, 0.2, length);
+    // Keep the tar visible as a solid black rectangle instead of exposing an empty shaft.
+    const pitGeo = new THREE.BoxGeometry(PATH_WIDTH, 0.3, length);
     const pitMesh = new THREE.Mesh(pitGeo, this.pitMaterial);
     pitMesh.position.set(0, -0.6, centerZ);
     group.add(pitMesh);
-    // Endless black abyss below the surface
-    this.addBottomlessShaft(group, centerZ, length);
 
     this.activeHazards.push({
       type: 'tarpit',
@@ -793,9 +769,6 @@ export class World {
     const pit = createOpeningQuicksandModel(0.45, 12);
     pit.group.position.set(0, -0.45, z);
     group.add(pit.group);
-    // Endless black abyss (20m wide, like the vine lake) below the moving lid
-    this.addBottomlessShaft(group, z, 20.4);
-
     const pitData = {
       type: 'disappearing_quicksand',
       screenIndex,
@@ -847,9 +820,6 @@ export class World {
     const waterMesh = new THREE.Mesh(waterGeo, this.waterMaterial);
     waterMesh.position.set(0, -0.6, centerZ);
     group.add(waterMesh);
-    // Endless black abyss below the lake
-    this.addBottomlessShaft(group, centerZ, length);
-
     this.activeHazards.push({
       type: 'water',
       screenIndex,
