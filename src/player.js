@@ -540,7 +540,7 @@ export class Player {
 
               if (croc.isOpen && isOnMouth) {
                 if (DEBUG_GOD_MODE) {
-                  return 0.35; // Act as if mouth is closed, step on it safely
+                   return 0.35; // Act as if mouth is closed, step on it safely
                 }
                 // Stepped directly into the open mouth!
                 audio.playChomp();
@@ -553,9 +553,10 @@ export class Player {
               return 0.35;
             }
           }
+          
           // Water and tar are lethal on contact; no physical shaft is needed.
-          if (hazard.type === 'tarpit' || (hazard.type === 'water' && this.y <= 0.35)) {
-            if (!DEBUG_GOD_MODE && this.y <= 0.35) {
+          if (hazard.type === 'tarpit' || hazard.type === 'water') {
+            if (!DEBUG_GOD_MODE && this.y <= -10) {
               audio.playSink();
               this.die('death.abyss');
             }

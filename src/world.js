@@ -676,7 +676,7 @@ export class World {
     const sideGeo = new THREE.BoxGeometry(0.5, 7.5, length);
     for (const x of [-4.75, 4.75]) {
       const wall = new THREE.Mesh(sideGeo, this.tunnelWallMaterial);
-      wall.position.set(x, TUNNEL_FLOOR_Y + 3.5, midZ);
+      wall.position.set(x, TUNNEL_FLOOR_Y + 3, midZ);
       group.add(wall);
     }
 
