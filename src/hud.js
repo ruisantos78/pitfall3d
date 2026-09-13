@@ -128,7 +128,7 @@ export class HUD {
       // If within 15 units of a crocodile
       if (nearestCroc && minDistance < 15) {
         // Check if player is currently standing on this crocodile
-        const isStandingOnThisCroc = player.isGrounded && Math.abs(player.y - 0.35) < 0.25 && (player.z >= nearestCroc.z - 1.3 && player.z <= nearestCroc.z + 3.2);
+        const isStandingOnThisCroc = player.isGrounded && Math.abs(player.y - 0.35) < 0.25 && (player.z >= nearestCroc.z - 1.2 && player.z <= nearestCroc.z + 2.8);
 
         if (isStandingOnThisCroc) {
           if (player.z <= nearestCroc.z + 0.65) {

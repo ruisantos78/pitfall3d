@@ -112,9 +112,12 @@ export class World {
     const screenType = this.getScreenType(index);
 
     // 1. Build Ground and Corridor Trees
-    this.buildGroundAndBorders(group, startZ, endZ, screenType);
+    this.buildGroundAndBorders(group, index, startZ, endZ, screenType);
 
-    // 2. Build Specific Screen Hazards / Features
+    // 2. Bandeirinhas de limite no início e fim da tela (visuais + checkpoints)
+    this.addBoundaryFlags(group, startZ, endZ);
+
+    // 3. Build Specific Screen Hazards / Features
     this.buildScreenFeatures(group, index, startZ, endZ, midZ, screenType);
 
     return {
@@ -126,27 +129,52 @@ export class World {
     };
   }
 
-  // Deterministic Pitfall 2600 screen sequence
-  getScreenType(index) {
-    if (index === 0) return 'START_TRAIL'; // Introductory easy trail
-    const pattern = [
-      'STATIONARY_LOGS',
-      'DISAPPEARING_QUICKSAND', // Classic opening & closing quicksand hole!
-      'QUICKSAND_VINE',         // Lago azul com cipó
-      'ROLLING_LOGS',
-      'CROCODILE_POND',
-      'QUICKSAND_AND_LOG',      // Disappearing quicksand + rolling log
-      'CAMPFIRE_TREASURE',
-      'TAR_PIT_VINE',
-      'SCORPION_RUN',
-      'CROCODILE_VINE',
-      'TRIPLE_LOGS',
-      'BIG_TREASURE',
-    ];
-    return pattern[(index - 1) % pattern.length];
+  // --- Authentic Atari 2600 level generator (pitfall.asm) ---
+  // Bidirectional LFSR, seed $C4. Forward (-Z) = RightRandom:
+  //   random' = (random << 1) | (bit3^bit4^bit5^bit7)
+  // Bits: 0..2 ground object, 3..5 scene, 6..7 tree pattern, 7 wall side.
+  static lfsrRight(r) {
+    const b3 = (r >> 3) & 1, b4 = (r >> 4) & 1, b5 = (r >> 5) & 1, b7 = (r >> 7) & 1;
+    return ((r << 1) & 0xff) | (b3 ^ b4 ^ b5 ^ b7);
   }
 
-  buildGroundAndBorders(group, startZ, endZ, screenType) {
+  // Screen N (N>=1) = seed stepped (N-1) times right. Index 0 stays tutorial.
+  getAuthenticSpec(index) {
+    if (index <= 0) return null;
+    let r = 0xc4;
+    for (let i = 1; i < index; i++) r = World.lfsrRight(r);
+    const objectType = r & 0x07;
+    const sceneType = (r >> 3) & 0x07;
+    const treePat = (r >> 6) & 0x03;
+    return { rand: r, objectType, sceneType, treePat };
+  }
+
+  // Deterministic Pitfall 2600 screen sequence (hybrid authentic+)
+  getScreenType(index) {
+    if (index === 0) return 'START_TRAIL'; // Introductory easy trail
+    const spec = this.getAuthenticSpec(index);
+    // Cena 4 (jacarés): metade com cipó, metade só com jacarés (decide pelo
+    // treePat do LFSR — determinístico, o mapa nunca muda).
+    if (spec.sceneType === 4) {
+      return spec.treePat % 2 === 0 ? 'CROCODILE_VINE' : 'CROCODILE_POND';
+    }
+    const base = [
+      'HOLE_SINGLE',            // 0: one hole + ladder/wall underground
+      'HOLE_TRIPLE',            // 1: three holes
+      'TAR_PIT_VINE',           // 2: black pit + vine
+      'QUICKSAND_VINE',         // 3: blue swamp + vine
+      'CROCODILE_VINE',         // 4: (tratado acima)
+      'DISAPPEARING_QUICKSAND', // 5: black quicksand + treasure
+      'QUICKSAND_VINE_OPEN',    // 6: black quicksand + vine
+      'BLUE_QUICKSAND',         // 7: blue quicksand (no vine)
+    ][spec.sceneType];
+    // Hybrid+: keep current rolling-log/vine-variety extras alive by
+    // re-injecting them when the authentic cell would otherwise be bare
+    // (bare rolling-log cells already cover ROLLING_LOGS/TRIPLE_LOGS).
+    return base;
+  }
+
+  buildGroundAndBorders(group, index, startZ, endZ, screenType) {
     const length = SCREEN_LENGTH;
     const stepZ = 2;
 
@@ -175,18 +203,21 @@ export class World {
 
     // Build Ground Voxel Strips
     // If screen has a pit/pond in the middle, create a gap in ground
-    const hasCentralHazard = ['QUICKSAND_VINE', 'TAR_PIT_VINE', 'CROCODILE_POND', 'CROCODILE_VINE'].includes(screenType);
-    // Meio-comprimento do lago central: 16m nos lagos dos crocodilos (32m,
-    // com vãos de pulo entre eles), 10m no lago do cipó e no piche (20m).
-    const centralHazardHalf = ['CROCODILE_POND', 'CROCODILE_VINE'].includes(screenType) ? 13 : 10;
+    const hasCentralHazard = ['QUICKSAND_VINE', 'TAR_PIT_VINE', 'CROCODILE_VINE', 'CROCODILE_POND', 'QUICKSAND_VINE_OPEN', 'BLUE_QUICKSAND', 'HOLE_SINGLE'].includes(screenType);
+    // Meio-comprimento do lago central: 8m no lago dos jacarés (16m,
+    // cruzável só com o cipó) e 10m no lago do cipó e no piche (20m).
+    const centralHazardHalf = ['CROCODILE_VINE', 'CROCODILE_POND'].includes(screenType) ? 8 : (screenType === 'HOLE_SINGLE' ? 3 : 10);
     const hazardStartZ = (startZ + endZ) / 2 + centralHazardHalf;
     const hazardEndZ = (startZ + endZ) / 2 - centralHazardHalf;
 
     const midZ = (startZ + endZ) / 2;
-    const hasDisappearingPit = ['DISAPPEARING_QUICKSAND', 'QUICKSAND_AND_LOG'].includes(screenType);
-    const pitCenterZ = screenType === 'QUICKSAND_AND_LOG' ? midZ + 6 : midZ;
-    const hasLogExitPit = ['ROLLING_LOGS', 'QUICKSAND_AND_LOG', 'TRIPLE_LOGS'].includes(screenType);
-    const logExitPitCenterZ = startZ - 2.5;
+    const hasDisappearingPit = ['DISAPPEARING_QUICKSAND', 'BLUE_QUICKSAND'].includes(screenType);
+    const pitCenterZ = midZ;
+    // Poço azul de saída dos troncos (1 fileira, ~1.5m). Só nas telas com
+    // rolling logs do mapa superior (obj 0..3, scene != 5).
+    const specForGround = index === 0 ? null : this.getAuthenticSpec(index);
+    const hasLogExitPit = !!specForGround && specForGround.sceneType !== 5 && specForGround.objectType <= 3;
+    const logExitPitCenterZ = startZ - 0.75;
 
     const groundVoxels = [];
     const grassColor = '#306c24';
@@ -198,18 +229,22 @@ export class World {
       const worldZ = startZ - z;
       const isOverHazard = hasCentralHazard && (worldZ <= hazardStartZ && worldZ >= hazardEndZ);
       const isOverDisappearingPit = hasDisappearingPit && Math.abs(worldZ - pitCenterZ) <= 10.2;
+      // Authentic triple holes: three 4m pits at midZ+12 / midZ / midZ-12
+      const isOverTripleHole = screenType === 'HOLE_TRIPLE' &&
+        (Math.abs(worldZ - (midZ + 12)) <= 2.2 || Math.abs(worldZ - midZ) <= 2.2 || Math.abs(worldZ - (midZ - 12)) <= 2.2);
+      // Saída dos troncos: 1 fileira em TODA a largura (inclusive o verde)
+      const isOverLogExit = hasLogExitPit && Math.abs(worldZ - logExitPitCenterZ) <= 0.8;
+      if (isOverLogExit) continue;
 
-      if (!isOverHazard) {
-        // Path corridor voxels (-3 to +3)
-        for (let x = -4; x <= 4; x++) {
-          const isEdge = Math.abs(x) >= 3;
-          // Leave opening on path for disappearing pit model
-          if ((isOverDisappearingPit || (hasLogExitPit && Math.abs(worldZ - logExitPitCenterZ) <= 2.5)) && !isEdge) continue;
+      // Path corridor voxels (-3 to +3). A parte verde (|x|>=3) fica
+      // sempre visível nos demais pits — só o caminho central abre buraco.
+      for (let x = -4; x <= 4; x++) {
+        const isEdge = Math.abs(x) >= 3;
+        if (!isEdge && (isOverHazard || isOverDisappearingPit || isOverTripleHole)) continue;
 
           let col = isEdge ? ((x + z) % 2 === 0 ? grassBorderColor : grassColor) : (((x + z) % 3 === 0) ? pathShade : pathColor);
           groundVoxels.push({ x, y: 0, z: -z, color: col });
         }
-      }
     }
 
     if (groundVoxels.length > 0) {
@@ -240,100 +275,154 @@ export class World {
   }
 
   buildScreenFeatures(group, index, startZ, endZ, midZ, type) {
-    if (['ROLLING_LOGS', 'QUICKSAND_AND_LOG', 'TRIPLE_LOGS'].includes(type)) {
-      this.addLogExitPit(group, index, startZ);
+    if (type === 'START_TRAIL') {
+      // Safe starting area with one stationary log to learn jumping
+      this.addStationaryLog(group, index, midZ - 5);
+      this.addTreasure(group, index, midZ - 18, 'gold');
+      return;
     }
 
+    // Authentic spec from pitfall.asm LFSR (seed $C4, stepped right)
+    const spec = this.getAuthenticSpec(index) || { objectType: 4, sceneType: 0, treePat: 0 };
+    const obj = spec.objectType;
+    const scene = spec.sceneType;
+    const treasureKinds = ['money', 'silver', 'gold', 'diamond'];
+
+    // Overlay ground object — SOMENTE mapa superior (pitfall.asm bits 0..2).
+    // Subterrâneo (escada/parede/escorpião de scene 0-1) omitido por enquanto.
+    // obj 7 = cobra da superfície: sem modelo próprio ainda, então não
+    // spawna nada (o modelo de escorpião é exclusivo do subterrâneo).
+    // Troncos rolantes: pontos fixos e determinísticos em vagas sólidas
+    // (nunca no meio de lagos/buracos), sem aleatoriedade.
+    const addOverlayObject = (z) => {
+      if (scene === 5) return; // treasure handled with quicksand below
+      if (obj <= 3) {
+        const count = [1, 2, 2, 3][obj];
+        for (let i = 0; i < count; i++) {
+          this.addRollingLog(group, index, startZ, endZ, i, count);
+        }
+        this.addLogExitPit(group, index, startZ);
+      } else if (obj === 4) {
+        this.addStationaryLog(group, index, z);
+      } else if (obj === 5) {
+        this.addStationaryLog(group, index, z + 5);
+        this.addStationaryLog(group, index, z - 5);
+      } else if (obj === 6) {
+        this.addCampfire(group, index, z);
+      }
+      // obj === 7 (cobra): omitido — só parte superior, sem escorpião na superfície.
+    };
+
     switch (type) {
-      case 'START_TRAIL':
-        // Safe starting area with one stationary log to learn jumping
-        this.addStationaryLog(group, index, midZ - 5);
-        this.addTreasure(group, index, midZ - 18, 'gold');
+      case 'HOLE_SINGLE':
+        // Original: one jumpable hole (ladder/wall underground omitted in FPS).
+        this.addTarPit(group, index, midZ, 6);
+        addOverlayObject(midZ + 14);
         break;
 
-      case 'STATIONARY_LOGS':
-        // Two stationary logs to jump over
-        this.addStationaryLog(group, index, midZ + 8);
-        this.addStationaryLog(group, index, midZ - 8);
-        this.addTreasure(group, index, midZ, 'silver');
+      case 'HOLE_TRIPLE':
+        // Original: three jumpable holes.
+        [12, 0, -12].forEach((off) => this.addTarPit(group, index, midZ + off, 4));
+        addOverlayObject(midZ + 20);
         break;
 
-      case 'DISAPPEARING_QUICKSAND':
-        // The iconic opening & closing quicksand hole! Run across when closed!
+      case 'DISAPPEARING_QUICKSAND': {
+        // Original scene 5: black quicksand + treasure (obj&3 selects which).
+        const kind = treasureKinds[obj & 3];
         this.addOpeningQuicksandPit(group, index, midZ);
-        this.addTreasure(group, index, midZ - 12, 'gold');
+        this.addTreasure(group, index, midZ - 12, kind);
         break;
+      }
 
-      case 'QUICKSAND_AND_LOG':
-        // Opening & closing quicksand hole + rolling log!
-        this.addOpeningQuicksandPit(group, index, midZ + 6);
-        this.addRollingLog(group, index, midZ - 8, startZ, endZ);
-        this.addTreasure(group, index, midZ - 16, 'silver');
-        break;
-
-      case 'ROLLING_LOGS':
-        // Logs rolling toward player!
-        this.addRollingLog(group, index, midZ + 12, startZ, endZ);
-        this.addRollingLog(group, index, midZ - 6, startZ, endZ);
-        this.addTreasure(group, index, midZ - 20, 'gold');
-        break;
-
-      case 'TRIPLE_LOGS':
-        // Three rolling logs
-        this.addRollingLog(group, index, midZ + 16, startZ, endZ);
-        this.addRollingLog(group, index, midZ + 2, startZ, endZ);
-        this.addRollingLog(group, index, midZ - 12, startZ, endZ);
-        this.addTreasure(group, index, midZ - 22, 'money');
+      case 'BLUE_QUICKSAND':
+        // Original scene 7: blue quicksand, no vine (surfable like black).
+        this.addOpeningQuicksandPit(group, index, midZ);
+        addOverlayObject(midZ + 14);
+        this.addTreasure(group, index, midZ - 14, 'silver');
         break;
 
       case 'QUICKSAND_VINE':
-        // Lago azul com cipó (travessia só pelo cipó)
+        // Original scene 3: blue swamp + vine.
         this.addWaterPond(group, index, midZ, 20);
         this.addVine(group, index, midZ);
+        addOverlayObject(midZ + 14);
         this.addTreasure(group, index, midZ - 14, 'gold');
         break;
 
       case 'TAR_PIT_VINE':
-        // Tar pit with swinging vine
+        // Original scene 2: black pit + vine.
         this.addTarPit(group, index, midZ, 20);
         this.addVine(group, index, midZ);
+        addOverlayObject(midZ + 14);
         this.addTreasure(group, index, midZ - 14, 'diamond');
         break;
 
-      case 'CROCODILE_POND':
-        // Pond with 3 spaced crocodiles (jump from one to the next)!
-        this.addWaterPond(group, index, midZ, 26);
+      case 'CROCODILE_VINE': {
+        // Original scene 4: croc pond (3 crocs) + vine.
+        // No ASM original, troncos (x=124) e jacarés (x=60) andam em faixas
+        // separadas — nunca sobrepostos. No corredor 1D, os obstáculos
+        // estáticos vão para a faixa de chão ANTES do lago (borda +8):
+        // nada parado dentro de midZ±8, para não bloquear o pulo entre jacarés.
+        // O lago tem 16m para dar para cruzar inteiro só com o cipó.
+        this.addWaterPond(group, index, midZ, 16);
         this.addCrocodileTrio(group, index, midZ);
+        this.addVine(group, index, midZ + 3);
+        if (scene !== 5) {
+          if (obj <= 3) {
+            // Rolantes no ponto único de queda (cruzam o lago de forma
+            // transiente, como camadas independentes no original).
+            const count = [1, 2, 2, 3][obj];
+            for (let i = 0; i < count; i++) {
+              this.addRollingLog(group, index, startZ, endZ, i, count);
+            }
+            this.addLogExitPit(group, index, startZ);
+          } else if (obj === 4) {
+            this.addStationaryLog(group, index, midZ + 19);
+          } else if (obj === 5) {
+            this.addStationaryLog(group, index, midZ + 19);
+            this.addStationaryLog(group, index, midZ + 24);
+          } else if (obj === 6) {
+            this.addCampfire(group, index, midZ + 19);
+          }
+        }
         this.addTreasure(group, index, midZ - 20, 'diamond');
         break;
+      }
 
-      case 'CROCODILE_VINE':
-        // Crocodile pond + UM único cipó alto (travessia com pulo para
-        // alcançar + ajuda dos jacarés).
-        this.addWaterPond(group, index, midZ, 26);
+      case 'CROCODILE_POND': {
+        // Lago só com jacarés (sem cipó): travessia pulando de jacaré em jacaré.
+        this.addWaterPond(group, index, midZ, 16);
         this.addCrocodileTrio(group, index, midZ);
-        this.addVine(group, index, midZ + 5);
+        if (scene !== 5) {
+          if (obj <= 3) {
+            const count = [1, 2, 2, 3][obj];
+            for (let i = 0; i < count; i++) {
+              this.addRollingLog(group, index, startZ, endZ, i, count);
+            }
+            this.addLogExitPit(group, index, startZ);
+          } else if (obj === 4) {
+            this.addStationaryLog(group, index, midZ + 19);
+          } else if (obj === 5) {
+            this.addStationaryLog(group, index, midZ + 19);
+            this.addStationaryLog(group, index, midZ + 24);
+          } else if (obj === 6) {
+            this.addCampfire(group, index, midZ + 19);
+          }
+        }
         this.addTreasure(group, index, midZ - 20, 'diamond');
         break;
+      }
 
-      case 'CAMPFIRE_TREASURE':
-        // Campfire in middle
-        this.addCampfire(group, index, midZ);
-        this.addTreasure(group, index, midZ - 10, 'money');
+      case 'QUICKSAND_VINE_OPEN':
+        // Original scene 6: black quicksand + vine.
+        this.addOpeningQuicksandPit(group, index, midZ);
+        this.addVine(group, index, midZ);
+        addOverlayObject(midZ + 14);
+        this.addTreasure(group, index, midZ - 14, 'gold');
         break;
 
-      case 'SCORPION_RUN':
-        // Scorpion crawling back and forth
-        this.addScorpion(group, index, midZ);
-        this.addStationaryLog(group, index, midZ + 12);
-        this.addTreasure(group, index, midZ - 12, 'silver');
-        break;
-
-      case 'BIG_TREASURE':
-        // Diamond guarded by campfire and stationary log
-        this.addCampfire(group, index, midZ + 6);
-        this.addStationaryLog(group, index, midZ - 8);
-        this.addTreasure(group, index, midZ, 'diamond');
+      default:
+        this.addStationaryLog(group, index, midZ);
         break;
     }
   }
@@ -341,7 +430,8 @@ export class World {
   // --- Hazard Builders ---
 
   addStationaryLog(group, screenIndex, z) {
-    const log = createLogModel(0.18);
+    // Tronco parado só na pista amarela (28 voxels ≈ 5m, sem cobrir o verde).
+    const log = createLogModel(0.18, 28);
     log.position.set(0, 0.45, z);
     group.add(log);
 
@@ -411,16 +501,26 @@ export class World {
     return { group, disc, ring, discMat, ringMat };
   }
 
-  addRollingLog(group, screenIndex, z, startZ, endZ) {
-    const log = createLogModel(0.18);
-    // Tronco cai do céu: nasce lá no alto para o jogador ver chegando
-    const spawnY = 10 + Math.random() * 3;
-    log.position.set(0, spawnY, z);
+  // Ciclo exato de um tronco: queda do céu (~0.88s) + rolagem 52m a 6.5m/s
+  // (8.0s) + queda no poço (~0.91s) ≈ 9.8s. Como a geometria é idêntica em
+  // toda tela, o ciclo é constante e o revezamento nunca deforma.
+  static ROLLING_CYCLE = 9.8;
+
+  addRollingLog(group, screenIndex, startZ, endZ, idx, count) {
+    // Tronco largo só na pista amarela (28 voxels ≈ 5m, sem cobrir o verde).
+    const log = createLogModel(0.18, 28);
+    const dropZ = this.rollingDropZ(endZ);
+    // Queda do céu sempre do ponto único da tela; os troncos revezam nele
+    // no tempo (idx/count do ciclo), sem aleatoriedade.
+    const spawnY = 12;
+    log.position.set(0, spawnY, dropZ);
+    log.visible = false;
     group.add(log);
 
     // Sinalização de alerta no chão: disco listrado + anel vermelho pulsante.
     // Cresce e pisca enquanto o tronco despenca, some ao tocar o solo.
-    const alert = this.createFallingLogWarning(z);
+    const alert = this.createFallingLogWarning(dropZ);
+    alert.group.visible = false;
     group.add(alert.group);
 
     const logData = {
@@ -432,16 +532,21 @@ export class World {
       alertRing: alert.ring,
       alertDiscMat: alert.discMat,
       alertRingMat: alert.ringMat,
-      z: z,
+      z: dropZ,
+      spawnZ: dropZ, // ponto único de retorno — sem Math.random
       y: spawnY,
+      spawnY,
       vy: 0,
-      falling: true,
+      waiting: true, // aguardando sua vez no revezamento
+      clock: 0,
+      nextDrop: (idx * World.ROLLING_CYCLE) / count,
+      falling: false,
       fallingIntoPit: false,
       groundY: 0.45,
       maxFallHeight: spawnY - 0.45,
       startZ,
       endZ,
-      exitPitZ: startZ,
+      exitPitZ: startZ, // poço azul do início da tela
       speed: 6.5, // units/sec towards player (+Z direction)
       radius: 1.2,
     };
@@ -450,9 +555,42 @@ export class World {
     this.activeHazards.push(logData);
   }
 
-  addLogExitPit(group, screenIndex, startZ, length = 5) {
+  // Bandeirinhas de limite no início e fim de cada tela: marcos visuais
+  // de fronteira e checkpoints (volte a elas ao morrer). Alternam o lado
+  // (direita no início, esquerda no fim) para não sobrepor na fronteira,
+  // com o pano sempre espelhado para dentro (lado da pista, longe das árvores).
+  addBoundaryFlags(group, startZ, endZ) {
+    const poleGeo = new THREE.BoxGeometry(0.14, 2.6, 0.14);
+    const flagGeo = new THREE.BoxGeometry(0.95, 0.55, 0.08);
+    const poleMat = new THREE.MeshLambertMaterial({ color: 0xf0e0c0 });
+    const flagMat = new THREE.MeshLambertMaterial({ color: 0xff3020 });
+    for (const [x, z] of [[5.0, startZ - 1], [-5.0, endZ + 1]]) {
+      const flag = new THREE.Group();
+      const pole = new THREE.Mesh(poleGeo, poleMat);
+      pole.position.y = 1.3;
+      flag.add(pole);
+      const cloth = new THREE.Mesh(flagGeo, flagMat);
+      cloth.position.set(x > 0 ? -0.55 : 0.55, 2.25, 0);
+      flag.add(cloth);
+      flag.position.set(x, 0, z);
+      group.add(flag);
+    }
+  }
+
+  // Ponto único de queda dos troncos rolantes por tela: 8m para dentro do
+  // fim da tela (longe do checkpoint da fronteira), sempre em chão sólido
+  // (fora de lagos/buracos) e longe dos tesouros centrais. Cada tela com
+  // troncos móveis tem UM só ponto — os troncos revezam nele no tempo.
+  rollingDropZ(endZ) {
+    return endZ + 8;
+  }
+
+  addLogExitPit(group, screenIndex, startZ, length = 1.5) {
     const centerZ = startZ - length / 2;
-    const pitWidth = PATH_WIDTH - 2;
+    // Buraco preto curto (1.5m = comprimento do tronco) em TODA a largura
+    // da via, incluindo o verde. O tronco cai nele e volta a despencar do
+    // céu no seu ponto único de origem.
+    const pitWidth = PATH_WIDTH + 1;
     const pitGeo = new THREE.BoxGeometry(pitWidth, 0.2, length);
     const pitMesh = new THREE.Mesh(pitGeo, this.pitMaterial);
     pitMesh.position.set(0, -0.6, centerZ);
@@ -556,18 +694,16 @@ export class World {
   }
 
   addCrocodileTrio(group, screenIndex, centerZ) {
-    // 3 Crocodiles spaced along the pond (X=0, spaced in Z).
+    // 3 jacarés reduzidos (0.22) ao longo do lago de 16m (X=0, espaçados em Z).
     // Cada jacaré cobre [z-1.3, z+3.2] (zona segura nas costas vai até z+0.65).
-    // O espaçamento agora é EXATAMENTE 6.75m (a distância cravada de um pulo máximo).
-    // O lago foi reduzido para 26m. Assim, o primeiro jacaré (8.0m) fica a apenas 5.0m
-    // da borda visual do lago (13.0m). Um pulo direto da borda de morte (12.0m) 
-    // cai exatamente em 5.25m, bem no bico do primeiro jacaré (-2.75 do centro).
-    const offsetsZ = [8.0, 1.25, -5.5];
+    // Espaçamento de 6.5m (pulo máximo = 6.75m): dá para ir de jacaré em
+    // jacaré, e o lago inteiro dá para cruzar só com o cipó.
+    const offsetsZ = [5.5, -1.0, -7.5];
     offsetsZ.forEach((offset, idx) => {
-      const croc = createCrocodileModel(0.26);
+      const croc = createCrocodileModel(0.22);
       const zPos = centerZ + offset;
-      // Topo em Y=0.35 (0.78 do modelo - 0.43): mesma altura física de antes.
-      croc.mesh.position.set(0, -0.43, zPos);
+      // Topo em Y=0.35 (3 voxels do modelo a 0.22 = 0.66, menos 0.31).
+      croc.mesh.position.set(0, -0.31, zPos);
       croc.mesh.rotation.y = 0; // Snouts point towards incoming player (+Z)!
       group.add(croc.mesh);
 
@@ -700,8 +836,28 @@ export class World {
       }
     });
 
-    // 3. Update Rolling Logs
+    // 3. Update Rolling Logs (ponto único de queda por tela: os troncos
+    // revezam nele no tempo via relógio — tudo determinístico, sem
+    // aleatoriedade: queda do céu, rolagem até o poço azul, queda no poço).
     this.activeRollingLogs.forEach(l => {
+      l.clock += delta;
+      // Aguardando sua vez no revezamento (invisível no alto).
+      if (l.waiting) {
+        if (l.clock >= l.nextDrop) {
+          l.nextDrop += World.ROLLING_CYCLE;
+          l.waiting = false;
+          l.falling = true;
+          l.z = l.spawnZ;
+          l.y = l.spawnY;
+          l.vy = 0;
+          l.mesh.visible = true;
+          l.mesh.position.z = l.z;
+          l.mesh.position.y = l.y;
+          l.landingShadow.visible = true;
+        } else {
+          return;
+        }
+      }
       // Queda do céu antes de rolar: gravidade até o solo
       if (l.falling) {
         l.vy -= 30 * delta;
@@ -733,7 +889,7 @@ export class World {
         l.mesh.position.y = l.y;
         l.mesh.rotation.x += delta * 3; // giro suave durante a queda
       } else if (l.fallingIntoPit) {
-        // O tronco chega à abertura no fim da tela e cai no buraco.
+        // O tronco chega ao poço azul e cai nele.
         l.vy -= 30 * delta;
         l.y += l.vy * delta;
         l.z = l.exitPitZ;
@@ -742,14 +898,13 @@ export class World {
         l.mesh.rotation.x += delta * 10;
 
         if (l.y <= -12) {
-          l.z = l.endZ - Math.random() * 4;
-          l.y = 10 + Math.random() * 4;
-          l.vy = 0;
-          l.falling = true;
+          // Caiu no poço: some e aguarda sua próxima vez no revezamento
+          // (nextDrop já agendado — o ciclo exato se mantém para sempre).
+          l.waiting = true;
+          l.falling = false;
           l.fallingIntoPit = false;
-          l.landingShadow.visible = true;
-          l.mesh.position.z = l.z;
-          l.mesh.position.y = l.y;
+          l.mesh.visible = false;
+          l.landingShadow.visible = false;
         }
       } else {
         l.mesh.position.y = l.groundY;
@@ -758,7 +913,7 @@ export class World {
         l.z += l.speed * delta;
         l.mesh.position.z = l.z;
 
-        // Ao sair da tela, cai na abertura em vez de reaparecer instantaneamente.
+        // Ao chegar ao poço azul, cai nele em vez de reaparecer de repente.
         if (l.z >= l.exitPitZ) {
           l.z = l.exitPitZ;
           l.y = l.groundY;

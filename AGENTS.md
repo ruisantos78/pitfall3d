@@ -83,7 +83,7 @@ pitfall/
   - The player starts at `z = 0` and **advances toward negative `Z`** (`vz < 0`).
   - Therefore: more negative coordinates are **ahead**; more positive coordinates are **behind**.
 - **Critical Functions:**
-  - `getCrocodileAt(world, z)`: Locates the specific crocodile under the player's feet within the extended range `[-1.6, +3.9]`.
+  - `getCrocodileAt(world, z)`: Locates the specific crocodile under the player's feet within the extended range `[-1.2, +2.8]`.
   - `getSurfaceElevation(world, z)`: Returns ground elevation (`0.0`), crocodile top (`0.35`) or abyss (`-10.0`).
   - `checkVineGrab(world)`: Detects proximity to the vine tip and anchors the player.
   - `releaseVine()`: Releases the vine with parabolic momentum. The released vine is stored in `ignoredVine` and skipped by `checkVineGrab` until landing or grabbing another vine (never re-grabs the SAME vine mid-flight; enables vine-to-vine transfers).
@@ -104,12 +104,11 @@ pitfall/
   - `DISAPPEARING_QUICKSAND` (20m moving quicksand)
   - `QUICKSAND_VINE` (20m blue lake with vine — vine-only crossing)
   - `ROLLING_LOGS` (rolling logs)
-  - `CROCODILE_POND` (32m pond with 3 crocodiles spaced at `[10.7, 0, -10.7]` — 5.2m water gaps between them force jumps from one croc to the next)
+  - `CROCODILE_VINE` (16m crocodile pond with 3 small crocodiles at `[5.5, -1.0, -7.5]` (6.5m spacing, jumpable nose-to-nose) + one vine at `+3`: the whole pond can be crossed vine-only, crocs are the backup path)
   - `QUICKSAND_AND_LOG` (moving quicksand + rolling log)
   - `CAMPFIRE_TREASURE` (campfires with dynamic flames)
   - `TAR_PIT_VINE` (tar pit with vine)
   - `SCORPION_RUN` (crawling scorpions)
-  - `CROCODILE_VINE` (32m crocodile pond + two anti-phase hanging vines at `+13`/`-2`: pressing jump at the forward extreme transfers straight onto the next vine, no flight in between)
 - **Dynamic Updates (`world.update(delta)`):**
   - Vine swing animation (`v.vine.pivot.rotation.x`).
   - 4.4s crocodile mouth cycle (closed, orange-eyed alert, red open, snap shut).
@@ -119,12 +118,13 @@ pitfall/
 - `createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12)`:
   - Fixed pit walls at `Y = -2..0`; bottom is the endless black shaft (`addBottomlessShaft`).
   - Lid split into 12 sections along `Z`: each section splits in half (halves slide from center to the sides on `X`) and sinks on `Y` as `openAmount` goes 0→1, with tremor while moving. Physics (`isQuicksandOpenAt`) and cycle are per-section.
-- `createCrocodileModel(voxelSize = 0.32)`:
+- `createCrocodileModel(voxelSize = 0.22)`:
   - Head/eyes at `Z = 0`.
   - Safe platform on scales and golden chevrons from `Z = -5` to `+2` (`z <= croc.z + 0.8`).
   - Articulated jaw from `Z = 3` to `12` with X-axis rotation and sharp teeth.
-- `createLogModel(voxelSize = 0.18)`:
-  - Log cylinder 0.90m in diameter (0.45m radius) and 3.06m wide.
+  - Top of the platform sits at `Y = 0.35` (mesh positioned at `Y = -0.31`).
+- `createLogModel(voxelSize = 0.18, lengthVoxels = 16)`:
+  - Log cylinder 0.90m in diameter (0.45m radius); rolling/stationary logs use 28 voxels (~5m, yellow track only).
   - Centered on the X rotation axis and resting at `Y = 0.45`, ensuring perfect rolling on the ground without sinking.
 - `createCampfireModel(voxelSize = 0.22)`:
   - Base with stone ring, ash bed and live embers grounded at `Y = 0.0` with `center = 'bottom'`.

@@ -103,9 +103,9 @@ export function createTreeModel(voxelSize = 0.45) {
 /**
  * Creates Rolling or Stationary Log Model
  */
-export function createLogModel(voxelSize = 0.18) {
+export function createLogModel(voxelSize = 0.18, lengthVoxels = 16) {
   const voxels = [];
-  const length = 16;
+  const length = lengthVoxels;
   const radius = 2;
 
   for (let x = -length / 2; x <= length / 2; x++) {

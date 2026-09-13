@@ -46,6 +46,8 @@ export class Player {
     this.deathReasonKey = 'death.lifeLost';
     this.tripCooldown = 0;
     this.isTripped = false; // Caiu de cara no chão e aguarda uma nova direção
+    // Checkpoint: última faixa de limite de tela atravessada (respawn volta nela).
+    this.checkpointZ = null;
     // Queda do céu no respawn (como no original): nasce lá no alto e despenca.
     this.RESPAWN_DROP_HEIGHT = 12;
     this.respawnDrop = false;
@@ -284,12 +286,23 @@ export class Player {
 
     // Responsive arcade acceleration
     this.vz = THREE.MathUtils.lerp(this.vz, targetVz, delta * 15);
+    const prevZ = this.z;
     this.z += this.vz * delta;
 
     // Prevent walking backwards off the starting edge of the map
     if (this.z > 0) {
       this.z = 0;
       this.vz = Math.min(this.vz, 0);
+    }
+
+    // Checkpoint: ao cruzar uma fronteira de tela para frente (-Z),
+    // registra 4m adiante da faixa como ponto de respawn.
+    if (this.vz < 0) {
+      const prevK = Math.floor(-prevZ / SCREEN_LENGTH);
+      const newK = Math.floor(-this.z / SCREEN_LENGTH);
+      if (newK > prevK) {
+        this.checkpointZ = -newK * SCREEN_LENGTH - 4;
+      }
     }
 
     // Single action button: JUMP
@@ -349,8 +362,8 @@ export class Player {
         closest = c;
       }
     }
-    // Only return if player is within this specific crocodile's physical bounds (-1.3 to +3.2)
-    if (closest && z >= closest.z - 1.3 && z <= closest.z + 3.2) {
+    // Only return if player is within this specific crocodile's physical bounds (-1.2 to +2.8)
+    if (closest && z >= closest.z - 1.2 && z <= closest.z + 2.8) {
       return closest;
     }
     return null;
@@ -401,7 +414,7 @@ export class Player {
       }
     }
 
-    // Pequeno poço no fim das telas de troncos: é preciso saltar por cima.
+    // Poço azul de saída dos troncos: é preciso saltar por cima.
     for (const hazard of world.activeHazards) {
       if (hazard.type === 'log_exit_pit' && z >= hazard.minZ && z <= hazard.maxZ) {
         return -10;
@@ -558,8 +571,8 @@ export class Player {
     // 1. Logs (Stationary & Rolling)
     for (const hazard of world.activeHazards) {
       if (hazard.type === 'log' || hazard.type === 'rolling_log') {
-        // Tronco ainda caindo do céu não atropela
-        if (hazard.falling || hazard.fallingIntoPit) continue;
+        // Tronco caindo do céu, no poço ou aguardando a vez (invisível) não atropela
+        if (hazard.falling || hazard.fallingIntoPit || hazard.waiting) continue;
         const distZ = Math.abs(this.z - hazard.z);
         // If close and not jumping high enough
         if (distZ < 1.0 && this.y < 0.75) {
@@ -739,7 +752,6 @@ export class Player {
   }
 
   // Distância mínima de perigos físicos (troncos parados/rolando, fogo, escorpião).
-  // Inclui a zona de queda sinalizada: tronco caindo (falling) reserva 4m.
   isRespawnClearOfHazards(world, z) {
     for (const hazard of world.activeHazards) {
       if (hazard.type === 'rolling_log') {
@@ -778,13 +790,19 @@ export class Player {
     this.tripStandTimer = 0;
     this.tripCooldown = 0;
 
-    // Respawn no começo da tela onde morreu (frente = -Z, começo = borda +Z)
+    // Respawn no último checkpoint (faixa atravessada); sem checkpoint,
+    // no começo da tela onde morreu (frente = -Z, começo = borda +Z).
     if (world) {
-      const screenIndex = Math.max(0, Math.floor(-this.z / SCREEN_LENGTH));
-      const screenStartZ = -screenIndex * SCREEN_LENGTH;
-      const baseZ = screenStartZ + 6;
-      // Desvia de pontos de queda de troncos e demais perigos: nunca nasce
-      // embaixo de um tronco caindo/rolando nem sobre poços/areia movediça.
+      let baseZ;
+      if (this.checkpointZ !== null && this.checkpointZ < 8) {
+        baseZ = this.checkpointZ;
+      } else {
+        const screenIndex = Math.max(0, Math.floor(-this.z / SCREEN_LENGTH));
+        baseZ = -screenIndex * SCREEN_LENGTH + 6;
+      }
+      const screenIndex = Math.max(0, Math.floor(-baseZ / SCREEN_LENGTH));
+      // Desvia de troncos e demais perigos: nunca nasce embaixo de um
+      // tronco rolando nem sobre poços/areia movediça.
       this.z = this.findSafeRespawnZ(world, baseZ, screenIndex);
     } else {
       // Fallback: recua 8 unidades
