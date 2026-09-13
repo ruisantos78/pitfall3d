@@ -104,16 +104,18 @@ pitfall/
   - Only the 255 original screens exist: `getAuthenticSpec(index)` steps the bidirectional LFSR (`seed $C4`, right-step `(r<<1)|(b3^b4^b5^b7)`) `(index mod 255)` times, so screen 255 wraps back to phase 1 — forward-only travel, seamless loop.
   - Bits decode exactly like the original: `0..2` ground object, `3..5` scene (`0` single hole, `1` triple holes, `2` tar pit, `3` blue swamp, `4` crocs, `5` treasure quicksand, `6` quicksand+vine, `7` blue quicksand), `6..7` tree pattern. Scene 4 splits by `treePat` parity: `CROCODILE_VINE` (vine crossing) vs `CROCODILE_POND` (croc-hopping only).
   - HUD shows the looping phase number (`001`..`255`).
-- **Underground (ladder scenes `HOLE_SINGLE`/`HOLE_TRIPLE`):**
-  - Surface holes are ladder shafts (`addLadderShaft`: dirt walls `0..-8`, wooden ladder on the exit wall). Walking in (grounded) auto-grabs and climbs down at 7 m/s; jumping over avoids it; shafts never kill.
-  - Each ladder screen has a full 60m tunnel (`addTunnel`: floor at `TUNNEL_FLOOR_Y = -8`, side/end dirt walls, warm `PointLight`, one slow patrolling scorpion (~2.2 m/s) confined to the largest shaft-free stretch — never under a ladder exit). End walls block passage to neighbor screens (deviation from the original's connected tunnels).
-  - Controls: `SPACE` under a shaft while grounded climbs back up (1s anti-regrab grace on exit). No vines below; scorpion kills only on the same level (`|dy| < 0.9`); death respawns at the surface checkpoint.
+- **Underground (continuous tunnel + ladder scenes `HOLE_SINGLE`/`HOLE_TRIPLE`):**
+  - EVERY screen has a tunnel stretch (`addTunnel`: floor at `TUNNEL_FLOOR_Y = -8`, side dirt walls, warm `PointLight`, NO end walls) — the underground runs seamlessly through the whole game; climb up at any ladder shaft.
+  - Cave ceiling (`addCaveCeiling`): dark slab at `y=-3` hiding the surface world from below, with holes ONLY over ladder shafts (light + passage); solid everywhere else.
+  - Ladder shafts (`addLadderShaft`, NO surrounding walls, just the wooden ladder — ladder ONLY in the middle hole, like the original; side holes drop straight in). Walking in (grounded) auto-grabs and climbs down at 7 m/s; jumping over avoids it; shafts never kill. `SPACE` under a shaft climbs back up (1s anti-regrab grace).
+  - Surface pits are shallow (2.5m) on purpose so they never invade the corridor below.
+  - Scorpion in ladder-free tunnels only (`addScorpion` at tunnel `midZ`, slow patrol `~2.2 m/s`, same-level kill) — ladder screens stay scorpion-free so every landing is safe.
 - **Classic Screen Sequence (all LFSR-driven, no invented loop):**
   - `HOLE_SINGLE` / `HOLE_TRIPLE` (ladder shafts + tunnel, see above)
   - `DISAPPEARING_QUICKSAND` (20m moving quicksand)
   - `QUICKSAND_VINE` (20m blue lake with vine — vine-only crossing)
-  - Rolling logs (1/2/3 from `obj 0..3`, single drop point + blue exit pit)
-  - `CROCODILE_VINE` (16m crocodile pond with 3 small crocodiles at `[5.5, -1.0, -7.5]` (6.5m spacing, jumpable nose-to-nose) + one vine at `+3`: the whole pond can be crossed vine-only, crocs are the backup path)
+  - Rolling logs (1/2/3 from `obj 0..3`, single drop point + black spiked exit pit: logs are impaled and cease to exist; hero falling on spikes is hit kill via `death.spikes`)
+  - `CROCODILE_VINE` (20m crocodile pond, same size as the vine-only lake, with 3 small crocodiles evenly spaced at `[6.5, 0, -6.5]` (6.5m, jumpable nose-to-nose) + one vine at the pit middle: the whole pond can be crossed vine-only, crocs are the backup path)
   - `CROCODILE_POND` (same pond, no vine — croc-hopping only)
   - Campfires, stationary logs, treasures (surface overlays from `obj 4..6` + scene 5)
 - **Dynamic Updates (`world.update(delta)`):**
@@ -215,3 +217,4 @@ make preview      # runs 'npm run preview'
 - **Always verify the build with `npm run build`** after changing JavaScript files.
 - **Don't change HUD message orientation**: remember the player runs forward (direction `-Z`). Any tip about approaching the crocodile's eyes must say to move **forward**, never backward.
 - **Keep user-facing texts bilingual**: the game supports PT/EN via `src/i18n.js` — never hardcode user-visible strings; add a dictionary key in both languages instead.
+- **All code documentation must be in English**: every comment, inline note, function header, and block of explanatory text inside `src/` files must be written in clear, natural English. Do **not** write or leave Portuguese in code comments — even for quick notes. User-facing strings (the `STRINGS` dictionary in `i18n.js`) remain bilingual PT/EN as always; only the source-code documentation must be English-only. If you find a Portuguese comment while working on a file, translate it before committing your changes.

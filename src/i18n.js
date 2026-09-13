@@ -1,4 +1,4 @@
-// Idiomas (PT/EN) + preferências persistidas no browser (localStorage)
+// Languages (PT/EN) + user preferences persisted in the browser (localStorage)
 const STORAGE_KEY = 'pitfall3d-settings';
 
 const STRINGS = {
@@ -23,7 +23,7 @@ const STRINGS = {
     'menu.logsK': 'TRONCOS:',
     'menu.logsV': 'Pule sobre eles para não tropeçar; se cair de cara, pressione uma direção ou o botão de pulo para levantar!',
     'menu.tunnelK': 'SUBTERRÂNEO:',
-    'menu.tunnelV': 'Entre a pé nos buracos com escada para descer! [ESPAÇO] sob a escada volta à superfície. Cuidado com o escorpião!',
+    'menu.tunnelV': 'Entre a pé nos buracos com escada para descer pelo túnel contínuo! Buracos sem escada despencam direto. [ESPAÇO] sob a escada volta à superfície! Cuidado com o escorpião nos túneis sem escada!',
     'menu.treasuresK': 'TESOUROS:',
     'menu.treasuresV': 'Colete barras de ouro, prata, diamantes e sacos de dinheiro!',
     'menu.time': 'Você tem 20 minutos para explorar a selva e pontuar o máximo!',
@@ -75,6 +75,8 @@ const STRINGS = {
     'death.quicksand': 'A areia movediça se abriu sob seus pés!',
     'death.abyss': 'Você afundou no abismo / areia movediça!',
     'death.fire': 'Queimado pela fogueira!',
+    'death.spikes': 'Espetado nos espinhos do poço!',
+    'death.cave': 'Esmagado contra o teto da caverna!',
     'death.scorpion': 'Picado por um escorpião venenoso!',
   },
   en: {
@@ -97,7 +99,7 @@ const STRINGS = {
     'menu.logsK': 'LOGS:',
     'menu.logsV': 'Jump over them to avoid tripping; if you fall flat, press a direction or the jump button to get up!',
     'menu.tunnelK': 'UNDERGROUND:',
-    'menu.tunnelV': 'Walk into ladder holes to climb down! [SPACE] under the ladder climbs back up. Beware the scorpion!',
+    'menu.tunnelV': 'Walk into ladder holes to go down into the endless tunnel! Holes without a ladder drop straight in. [SPACE] under the ladder climbs back up! Beware the scorpion in ladder-free tunnels!',
     'menu.treasuresK': 'TREASURES:',
     'menu.treasuresV': 'Collect gold bars, silver, diamonds and money bags!',
     'menu.time': 'You have 20 minutes to explore the jungle and score as much as possible!',
@@ -149,6 +151,8 @@ const STRINGS = {
     'death.quicksand': 'The quicksand opened under your feet!',
     'death.abyss': 'You sank into the abyss / quicksand!',
     'death.fire': 'Burned by the campfire!',
+    'death.spikes': 'Impaled on the pit spikes!',
+    'death.cave': 'Smashed onto the cave ceiling!',
     'death.scorpion': 'Stung by a venomous scorpion!',
   },
 };
@@ -166,14 +170,14 @@ try {
     if (Number.isFinite(saved.highScore) && saved.highScore > 0) highScore = Math.floor(saved.highScore);
   }
 } catch {
-  // localStorage indisponível: usa padrões
+  // localStorage unavailable: fall back to defaults
 }
 
 function persist() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ lang, showHelp, highScore }));
   } catch {
-    // ignora (modo privado etc.)
+    // Silently ignore storage errors (private mode, quota exceeded, etc.)
   }
 }
 
@@ -206,7 +210,7 @@ export function getHighScore() {
   return highScore;
 }
 
-// Registra a pontuação; retorna true se for novo recorde
+// Records the score; returns true if it's a new high score
 export function submitScore(score) {
   const value = Math.floor(score);
   if (value > highScore) {
@@ -217,7 +221,7 @@ export function submitScore(score) {
   return false;
 }
 
-// Aplica data-i18n (texto), data-i18n-aria (aria-label) e data-i18n-title (title)
+// Applies data-i18n (text), data-i18n-aria (aria-label) and data-i18n-title (title)
 export function applyStaticTexts() {
   document.querySelectorAll('[data-i18n]').forEach((el) => {
     el.textContent = t(el.getAttribute('data-i18n'));

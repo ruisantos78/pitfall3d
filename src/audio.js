@@ -1,9 +1,9 @@
 // 8-bit Retro Web Audio Synthesizer for Atari Pitfall 3D
 // Fully self-contained without external audio assets.
-// Os 6 efeitos clássicos (pulo, tesouro, morte, queda, tropeço, cipó) foram
-// re-sintetizados por análise espectral dos sons autênticos do Atari 2600
-// (referência: meatfighter/pitfall-js — nenhum arquivo de áudio copiado,
-// tudo gerado via Web Audio API em estilo TIA: onda quadrada com pitch em degraus).
+// The 6 classic effects (jump, treasure, death, fall, trip, vine) were
+// re-synthesized from spectral analysis of the authentic Atari 2600 sounds
+// (reference: meatfighter/pitfall-js — no audio files copied,
+// everything generated via Web Audio API in TIA style: square wave with stepped pitch).
 
 class RetroAudio {
   constructor() {
@@ -27,7 +27,7 @@ class RetroAudio {
     return this.enabled;
   }
 
-  // Sequência TIA: onda quadrada com pitch em degraus. notes = [[freqHz, durSec], ...]
+  // TIA sequence: square wave with stepped pitch. notes = [[freqHz, durSec], ...]
   playSteps(notes, volume = 0.2, delay = 0) {
     if (!this.enabled) return;
     this.init();
@@ -53,8 +53,8 @@ class RetroAudio {
     osc.stop(t + 0.03);
   }
 
-  // Autêntico grito do Tarzan do Atari 2600 ao agarrar o cipó:
-  // rosnado grave + iodel alternado 175/210Hz + cauda (total ~1.9s)
+  // Authentic Atari 2600 Tarzan yell when grabbing the vine:
+  // low growl + alternating 175/210Hz yodel + tail (total ~1.9s)
   playTarzanYell() {
     if (!this.enabled) return;
     const notes = [
@@ -67,7 +67,7 @@ class RetroAudio {
     this.playSteps(notes, 0.2);
   }
 
-  // Pulo clássico do Atari: varredura quadrada ascendente 300 -> 700Hz (~0.2s)
+  // Classic Atari jump: ascending square sweep 300 -> 700Hz (~0.2s)
   playJump() {
     if (!this.enabled) return;
     const notes = [
@@ -76,7 +76,7 @@ class RetroAudio {
     this.playSteps(notes, 0.22);
   }
 
-  // Tesouro autêntico: estalo de ruído + arpejo quadrado grave (~0.65s)
+  // Authentic treasure pickup: noise snap + low square arpeggio (~0.65s)
   playTreasure() {
     if (!this.enabled) return;
     this.init();
@@ -87,7 +87,7 @@ class RetroAudio {
     this.playSteps(notes, 0.16, 0.1);
   }
 
-  // Tropeço autêntico (kneel): zumbido áspero descendente 700 -> 60Hz (~0.4s)
+  // Authentic trip/stumble: harsh descending buzz 700 → 60 Hz (~0.4s)
   playTrip() {
     if (!this.enabled) return;
     this.init();
@@ -144,7 +144,7 @@ class RetroAudio {
     osc.stop(now + 0.08);
   }
 
-  // Morte autêntica do Atari 2600: degraus graves 140 -> 80 -> 140 -> 100Hz (~2.1s)
+  // Authentic Atari 2600 death jingle: low steps 140 → 80 → 140 → 100 Hz (~2.1s)
   playLifeLost() {
     if (!this.enabled) return;
     this.playSteps(
@@ -158,7 +158,7 @@ class RetroAudio {
     );
   }
 
-  // Fim de jogo: o jingle de morte original (o cartucho repete o mesmo som)
+  // Game over: the original death jingle (the cartridge repeats the same sound)
   playGameOver() {
     if (!this.enabled) return;
     this.playSteps(
@@ -172,7 +172,7 @@ class RetroAudio {
     );
   }
 
-  // Queda no buraco autêntica: dois degraus graves 80 -> 140Hz (~0.4s)
+  // Authentic pit fall: two low steps 80 → 140 Hz (~0.4s)
   playSink() {
     if (!this.enabled) return;
     this.playSteps(
@@ -182,6 +182,30 @@ class RetroAudio {
       ],
       0.28,
     );
+  }
+
+  // Whistling fall into a ladder-free pit (pitfall-js 'fall' style, 100%
+  // synthesized): descending glissando 900 → 150 Hz (~0.7s, the 8m drop)
+  playHoleFall() {
+    if (!this.enabled) return;
+    this.init();
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(900, now);
+    osc.frequency.exponentialRampToValueAtTime(150, now + 0.7);
+
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.7);
   }
 
   // Disappearing quicksand opening / rumbling

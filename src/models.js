@@ -166,15 +166,7 @@ export function createCrocodileModel(voxelSize = 0.32) {
     }
   }
 
-  // Water ripple ring around base of crocodile
-  for (let z = -6; z <= 13; z++) {
-    for (let x = -5; x <= 5; x++) {
-      const isPerimeter = Math.abs(x) === 5 || z === -6 || z === 13;
-      if (isPerimeter) {
-        baseVoxels.push({ x, y: 0, z, color: (x + z) % 2 === 0 ? '#1098a8' : '#20b8c8' });
-      }
-    }
-  }
+  // (no light water ring around — removed on request)
 
   // B. Fixed Lower Jaw (Extends forward from Z = 3 to 12)
   for (let z = 3; z <= 12; z++) {
@@ -267,7 +259,7 @@ export function createCrocodileModel(voxelSize = 0.32) {
 }
 
 /**
- * Creates Hanging Swinging Vine (Cipó)
+ * Creates Hanging Swinging Vine
  */
 export function createVineModel(length = 26, voxelSize = 0.25) {
   const group = new THREE.Group();
@@ -653,7 +645,7 @@ export function createTreasureModel(type = 'gold', voxelSize = 0.22) {
     }
   } else if (type === 'diamond') {
     points = 5000;
-    // Golden ring base (2 camadas para o aro não parecer afundado no solo)
+    // Golden ring base (2 layers so the band doesn't look sunken into the ground)
     for (let y = 0; y <= 1; y++) {
       for (let x = -2; x <= 2; x++) {
         for (let z = -2; z <= 2; z++) {
@@ -784,24 +776,24 @@ export function createPlayerArmsModel() {
 }
 
 /**
- * Creates the iconic Atari Pitfall Disappearing Quicksand Hole (Areia Movediça que Abre e Fecha)
- * LONG EDITION (20m, como o lago do cipó): o tampão é dividido em NUM_SEGMENTS
- * seções ao longo de Z que se partem ao meio (metades deslizam do centro para
- * as laterais em X) e afundam em Y, abrindo em onda da entrada (+Z, lado do
- * herói) até a saída (-Z) e fechando na ordem INVERSA (saída->entrada) —
- * o espelho da abertura.
+ * Creates the iconic Atari Pitfall Disappearing Quicksand Hole (quicksand that opens and closes)
+ * LONG EDITION (20m, like the vine lake): the lid is split into NUM_SEGMENTS
+ * sections along Z that split in half (halves slide from the center to
+ * the sides on X) and sink on Y, opening in a wave from the entry (+Z, hero
+ * side) to the exit (-Z) and closing in REVERSE order (exit->entry) —
+ * the mirror of the opening.
  */
 export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12) {
   const group = new THREE.Group();
   const baseOffset = -voxelSize / 2;
 
-  // 1. Fixed Pit: paredes do poço (escondidas abaixo da superfície para não ter bordas).
-  // Sem fundo de lama: o fundo é o poço negro sem fim adicionado em world.js
+  // 1. Fixed Pit: pit walls (hidden below the surface to avoid edges).
+  // No mud bottom: the bottom is the endless black shaft added in world.js
   const pitVoxels = [];
   const Z_MIN = -22;
   const Z_MAX = 22;
 
-  // Paredes verticais do poço (escondidas abaixo do tampão, Y=-4 até Y=-1)
+  // Vertical pit walls (hidden below the lid, Y=-4 to Y=-1)
   for (let y = -4; y <= -1; y++) {
     for (let x = -6; x <= 5; x++) {
       pitVoxels.push({ x, y, z: Z_MIN - 1, color: '#382010' });
@@ -818,7 +810,7 @@ export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12) 
   pitMesh.position.set(baseOffset, 0, baseOffset);
   group.add(pitMesh);
 
-  // 2. Tampão segmentado alargado para cobrir o buraco todo (-5 a 5 = 11 voxels)
+  // 2. Widened segmented lid covering the whole hole (-5 to 5 = 11 voxels)
   const totalRows = Z_MAX - Z_MIN + 1;
   const segments = [];
 
@@ -877,7 +869,7 @@ export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12) 
     });
   }
 
-  // Grupo fantasma para compatibilidade com o antigo tampão único.
+  // Ghost group for compatibility with the old single lid.
   const plug = new THREE.Group();
   group.add(plug);
 
@@ -887,7 +879,7 @@ export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12) 
     segments,
     voxelSize,
     numSegments,
-    radiusZ: (Z_MAX + 0.5) * voxelSize, // ~10.1m radius = 20m total length (como o lago do cipó)
+    radiusZ: (Z_MAX + 0.5) * voxelSize, // ~10.1m radius = 20m total length (like the vine lake)
     isOpen: false,
     timer: 0,
     currentY: 0,

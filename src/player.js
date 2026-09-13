@@ -1,7 +1,7 @@
 // Player Controller - 1st Person Perspective (FPS) for Atari Pitfall 3D
 import * as THREE from 'three';
 import { audio } from './audio.js';
-import { SCREEN_LENGTH, TUNNEL_FLOOR_Y } from './world.js';
+import { SCREEN_LENGTH, TUNNEL_FLOOR_Y, CEIL_TOP_Y } from './world.js';
 import { createPlayerArmsModel } from './models.js';
 import { t, getHighScore, getShowHelp, submitScore } from './i18n.js';
 
@@ -31,8 +31,8 @@ export class Player {
     // Vine grabbing state
     this.attachedVine = null; // { vine, centerZ, time }
     this.justReleasedVineTimer = 0;
-    // Cipó que acabou de soltar: ignorado até pousar ou agarrar outro cipó
-    // (impede re-agarrar o MESMO cipó no ar após a soltura).
+    // Vine just released: ignored until landing or grabbing another vine
+    // (prevents re-grabbing the SAME vine mid-air after release).
     this.ignoredVine = null;
 
     // Game stats
@@ -45,19 +45,19 @@ export class Player {
     this.deathTimer = 0;
     this.deathReasonKey = 'death.lifeLost';
     this.tripCooldown = 0;
-    this.isTripped = false; // Caiu de cara no chão e aguarda uma nova direção
-    // Checkpoint: última faixa de limite de tela atravessada (respawn volta nela).
+    this.isTripped = false; // Face-planted on the ground, waiting for a new direction
+    // Checkpoint: last screen boundary strip crossed (respawn returns to it).
     this.checkpointZ = null;
-    // Subterrâneo: no túnel e/ou subindo/descendo escada.
+    // Underground: in the tunnel and/or climbing up/down the ladder.
     this.inTunnel = false;
     this.climbing = null; // null | 'down' | 'up'
     this.climbZ = 0;
-    this.climbGrace = 0; // tempo sem redescer logo após subir
-    this.CLIMB_SPEED = 7.0; // descida/subida rápida da escada (~1.1s no poço de 8m)
-    // Queda do céu no respawn (como no original): nasce lá no alto e despenca.
+    this.climbGrace = 0; // time without climbing back down right after climbing up
+    this.CLIMB_SPEED = 7.0; // fast ladder climb down/up (~1.1s in the 8m pit)
+    // Sky fall on respawn (like the original): spawns high up and plummets down.
     this.RESPAWN_DROP_HEIGHT = 12;
     this.respawnDrop = false;
-    // O topo do chão é Y=0. A câmera e os braços precisam permanecer acima dele.
+    // The top of the ground is Y=0. The camera and arms must stay above it.
     this.PRONE_EYE_HEIGHT = 0.65;
     this.TRIP_STAND_DELAY = 0.25;
     this.tripStandTimer = 0;
@@ -104,8 +104,8 @@ export class Player {
       }
     });
 
-    // O mouse não é um botão de ação. Pulo e soltura do cipó usam apenas
-    // Espaço/Enter ou o botão circular touch.
+    // The mouse is not an action button. Jump and vine release use only
+    // Space/Enter or the round touch button.
     const btnFwd = document.getElementById('btn-forward');
     const btnBwd = document.getElementById('btn-backward');
     const btnAct = document.getElementById('btn-action');
@@ -209,7 +209,7 @@ export class Player {
     // State 2: NORMAL 1D MOVEMENT & JUMPING
     this.updateNormalMovement(delta, world);
 
-    // Enquanto está caído, não processa outros perigos nem coleta itens.
+    // While knocked down, skip other hazards and item pickups.
     if (this.isTripped) {
       this.updateArmsAndCamera(delta);
       return;
@@ -227,7 +227,7 @@ export class Player {
     }
 
     // Check if standing on a disappearing quicksand section opened beneath feet
-    // (cada seção abre/fecha por conta própria — só a seção sob os pés mata)
+    // (each section opens/closes on its own — only the section under the feet kills)
     if (!this.inTunnel && this.isGrounded && this.y <= 0.1 && world.activeOpeningPits) {
       for (const pitData of world.activeOpeningPits) {
         if (world.isQuicksandOpenAt(pitData, this.z)) {
@@ -238,7 +238,7 @@ export class Player {
       }
     }
 
-    // Na escada, sem agarrar cipó nem colisões (subindo/descendo em segurança)
+    // On the ladder, no vine grabs or collisions (climbing up/down safely)
     if (!this.climbing) {
       // Check automatic vine grab
       this.checkVineGrab(world);
@@ -252,7 +252,7 @@ export class Player {
   }
 
   updateNormalMovement(delta, world) {
-    // Subindo/descendo escada: vertical travado no poço, sem física normal
+    // Climbing up/down the ladder: vertical locked in the pit, no normal physics
     if (this.climbing) {
       this.actionJustPressed = false;
       this.vz = 0;
@@ -266,7 +266,7 @@ export class Player {
         this.inTunnel = this.climbing === 'down';
         this.climbing = null;
         this.isGrounded = true;
-        // Saiu do túnel em cima do poço: 1s para sair de cima antes de descer de novo
+        // Exited the tunnel on top of the pit: 1s to get clear before climbing back down
         if (!this.inTunnel) this.climbGrace = 1.0;
         audio.playGroundThud();
       } else {
@@ -277,9 +277,9 @@ export class Player {
     }
     if (this.climbGrace > 0) this.climbGrace -= delta;
 
-    // Depois de tropeçar, fica de cara no chão até o jogador pressionar uma
-    // direção ou o botão de pulo. A direção que o levanta também retoma a
-    // marcha; o pulo só levanta (o pulo em si exige um novo toque).
+    // After tripping, stays face-down on the ground until the player presses a
+    // direction or the jump button. The direction that picks him up also resumes
+    // walking; jump only picks him up (jumping itself needs a fresh press).
     if (this.isTripped) {
       this.vz = 0;
       this.vy = 0;
@@ -292,7 +292,7 @@ export class Player {
         this.isGrounded = true;
       }
 
-      // Botão de pulo levanta na hora (toque único, sem delay de segurar)
+      // Jump button picks him up instantly (single tap, no hold delay)
       if (jumpPressed) {
         this.isTripped = false;
         this.tripStandTimer = 0;
@@ -329,8 +329,8 @@ export class Player {
       this.vz = Math.min(this.vz, 0);
     }
 
-    // Checkpoint: ao cruzar uma fronteira de tela para frente (-Z),
-    // registra 4m adiante da faixa como ponto de respawn.
+    // Checkpoint: when crossing a screen boundary forward (-Z),
+    // register 4m past the strip as the respawn point.
     if (this.vz < 0) {
       const prevK = Math.floor(-prevZ / SCREEN_LENGTH);
       const newK = Math.floor(-this.z / SCREEN_LENGTH);
@@ -339,25 +339,10 @@ export class Player {
       }
     }
 
-    // Paredes do túnel: sem passagem para telas vizinhas no subterrâneo
-    if (this.inTunnel) {
-      const tunIndex = Math.floor(-this.z / SCREEN_LENGTH);
-      const tunStartZ = -tunIndex * SCREEN_LENGTH;
-      const tunEndZ = -(tunIndex + 1) * SCREEN_LENGTH;
-      if (this.z > tunStartZ - 2.5) {
-        this.z = tunStartZ - 2.5;
-        this.vz = Math.min(this.vz, 0);
-      }
-      if (this.z < tunEndZ + 2.5) {
-        this.z = tunEndZ + 2.5;
-        this.vz = Math.max(this.vz, 0);
-      }
-    }
-
-    // Single action button: JUMP (ou SUBIR a escada no túnel)
+    // Single action button: JUMP (or CLIMB the ladder in the tunnel)
     if (this.actionJustPressed) {
       this.actionJustPressed = false;
-      // No túnel sob um poço com escada: ESPAÇO sobe de volta à superfície
+        // In the tunnel under a pit with a ladder: SPACE climbs back to the surface
       if (this.inTunnel && this.isGrounded) {
         const shaft = this.getLadderShaftAt(world, this.z, 1.6);
         if (shaft) {
@@ -384,23 +369,37 @@ export class Player {
     const standingSurfaceY = this.getSurfaceElevation(world, this.z);
 
     if (this.y <= standingSurfaceY) {
-      if (standingSurfaceY > -5) {
-        // Landed safely on ground or crocodile snout
+      if (standingSurfaceY > -5 || standingSurfaceY === TUNNEL_FLOOR_Y) {
+        // Landed ON TOP of the cave ceiling slab: hit kill
+        if (standingSurfaceY === CEIL_TOP_Y) {
+          this.y = CEIL_TOP_Y;
+          audio.playTrip();
+          this.die(this.ceilDeathKey || 'death.cave');
+          return;
+        }
+        // Landed safely on ground, crocodile snout or tunnel floor
+        const fellFast = this.vy < -8;
         this.y = standingSurfaceY;
         this.vy = 0;
         this.isGrounded = true;
-        // Pousou: o cipó ignorado volta a ser agarrável.
+        // Landed in the tunnel (dropped from a pit with no ladder): mark the level
+        if (standingSurfaceY === TUNNEL_FLOOR_Y) {
+          this.inTunnel = true;
+          // 8m fall: dull impact thud
+          if (fellFast) audio.playGroundThud();
+        }
+        // Landed: the ignored vine becomes grabbable again.
         this.ignoredVine = null;
-        // Aterrissou da queda do céu do respawn: baque seco de impacto.
+        // Landed from the respawn sky fall: dull impact thud.
         if (this.respawnDrop) {
           this.respawnDrop = false;
           audio.playGroundThud();
         }
       } else {
-        // Fell into pit / water / quicksand!
-        if (this.y < -1.2) {
-          audio.playSink();
-          this.die('death.abyss');
+        // TEMP: fall death DISABLED — safety net: fell too deep
+        // in a pit with no exit, return to checkpoint without losing a life.
+        if (this.y < -25) {
+          this.respawn(world);
           return;
         }
       }
@@ -408,8 +407,8 @@ export class Player {
       this.isGrounded = false;
     }
 
-    // Entrou a pé no poço com escada: agarra e desce ao túnel
-    // (pular por cima evita a descida — só desce andando no chão).
+    // Walked into a pit on foot: with a ladder grab and climb down; without a ladder drop
+    // (jumping over avoids both — only climbs down/falls while walking on the ground).
     if (!this.inTunnel && !this.climbing && this.isGrounded && this.y < 0.2 && this.vy <= 0 && this.climbGrace <= 0) {
       const shaft = this.getLadderShaftAt(world, this.z, 0);
       if (shaft && Math.abs(this.z - shaft.centerZ) < shaft.half - 0.5) {
@@ -420,14 +419,37 @@ export class Player {
         this.vy = 0;
         return;
       }
+      const drop = this.getDropShaftAt(world, this.z);
+      if (drop && Math.abs(this.z - drop.centerZ) < drop.half - 0.5) {
+        // Hole without a ladder: drops straight into the tunnel (already below the rim
+        // so it does not stick to the edge — physics takes over the fall from there).
+        // Like the original, dropping down costs 100 points.
+        this.isGrounded = false;
+        this.y = -0.35;
+        this.vy = -2;
+        this.score = Math.max(0, this.score - 100);
+        audio.playHoleFall();
+        return;
+      }
     }
   }
 
-  // Poço com escada que contém Z (margem extra nas bordas)
+  // Pit WITH a ladder containing Z (extra margin on the edges)
   getLadderShaftAt(world, z, margin = 0) {
     if (!world.activeHazards) return null;
     for (const h of world.activeHazards) {
-      if (h.type === 'ladder_shaft' && z >= h.minZ - margin && z <= h.maxZ + margin) {
+      if (h.type === 'ladder_shaft' && h.hasLadder && z >= h.minZ - margin && z <= h.maxZ + margin) {
+        return h;
+      }
+    }
+    return null;
+  }
+
+  // Pit WITHOUT a ladder containing Z (drops straight down)
+  getDropShaftAt(world, z) {
+    if (!world.activeHazards) return null;
+    for (const h of world.activeHazards) {
+      if (h.type === 'ladder_shaft' && !h.hasLadder && z >= h.minZ && z <= h.maxZ) {
         return h;
       }
     }
@@ -455,15 +477,39 @@ export class Player {
 
   // Determine surface elevation (ground or stepped hazard)
   getSurfaceElevation(world, z) {
-    // No túnel, o chão de terra segue por baixo de tudo da superfície
+    // In the tunnel, the dirt ground runs underneath everything on the surface
     if (this.inTunnel || this.y < -4) {
-      return TUNNEL_FLOOR_Y;
+      // In the tunnel on screens... (continuous tunnel; outside it would be free fall)
+      if (this.inTunnel) return TUNNEL_FLOOR_Y;
     }
-    // Poço com escada: nunca mata — pulando por cima é sólido, andando
-    // no chão a descida é tratada no movimento (agarra a escada).
+    // Falling below the rim (y < -2.5): the cave ceiling slab is solid at -3,
+    // except at the pit holes (there keep falling down to the tunnel).
+    if (!this.inTunnel && !this.climbing && this.y < -2.5 && this.y > -7.5) {
+      const overShaft = this.getLadderShaftAt(world, z, 0) || this.getDropShaftAt(world, z);
+      if (overShaft) return TUNNEL_FLOOR_Y;
+      // Death reason depends on where it fell: lake/tar/quicksand = abyss
+      this.ceilDeathKey = 'death.cave';
+      for (const h of world.activeHazards) {
+        if ((h.type === 'tarpit' || h.type === 'water' || h.type === 'quicksand') && z <= h.maxZ && z >= h.minZ) {
+          this.ceilDeathKey = 'death.abyss';
+          break;
+        }
+      }
+      if (this.ceilDeathKey === 'death.cave' && world.activeOpeningPits) {
+        for (const p of world.activeOpeningPits) {
+          if (Math.abs(z - p.z) < p.radius && world.isQuicksandOpenAt(p, z)) {
+            this.ceilDeathKey = 'death.abyss';
+            break;
+          }
+        }
+      }
+      return CEIL_TOP_Y;
+    }
+    // Pit with/without a ladder: solid on the rim, once falling the ground is the tunnel.
+    // (With a ladder the descent is via the animation; without a ladder drop straight down.)
     for (const hazard of world.activeHazards) {
       if (hazard.type === 'ladder_shaft' && z <= hazard.maxZ && z >= hazard.minZ) {
-        return 0.0;
+        return this.y < -0.3 ? TUNNEL_FLOOR_Y : 0.0;
       }
     }
     // Check if player is over a pit/pond hazard
@@ -494,24 +540,28 @@ export class Player {
       }
     }
 
-    // Check disappearing quicksand pits (cada seção é solo ou abismo)
+    // Check disappearing quicksand pits (each section is ground or abyss)
     if (world.activeOpeningPits) {
       for (const pitData of world.activeOpeningPits) {
         if (Math.abs(z - pitData.z) < pitData.radius) {
           if (world.isQuicksandOpenAt(pitData, z)) {
-            // A seção sob os pés está aberta!
+            // The section under the feet is open!
             return -10;
           } else {
-            // Seção fechada! Solo sólido, dá para correr!
+            // Closed section! Solid ground, safe to run!
             return 0.0;
           }
         }
       }
     }
 
-    // Poço azul de saída dos troncos: é preciso saltar por cima.
+    // Log exit pit (spikes): jump over it; falling inside is a hit kill.
     for (const hazard of world.activeHazards) {
       if (hazard.type === 'log_exit_pit' && z >= hazard.minZ && z <= hazard.maxZ) {
+        if (this.y < -0.3) {
+          audio.playTrip();
+          this.die('death.spikes');
+        }
         return -10;
       }
     }
@@ -520,19 +570,19 @@ export class Player {
     return 0.0;
   }
 
-  // Automatic vine grab when close in distance (só no ar: é preciso PULAR)
+  // Automatic vine grab when close in distance (only mid-air: must JUMP)
   checkVineGrab(world) {
     if (this.justReleasedVineTimer > 0) return;
-    // Parado no chão nunca agarra: o cipó fica alto de propósito.
+    // Standing still on the ground never grabs: the vine hangs high on purpose.
     if (this.isGrounded) return;
-    // No túnel não há cipós ao alcance.
+    // In the tunnel there are no vines within reach.
     if (this.inTunnel || this.y < -2) return;
     const tipPos = new THREE.Vector3();
 
     for (const vineData of world.activeVines) {
       if (!vineData.vine.tip) continue;
-      // Nunca re-agarra o cipó que acabou de soltar (só libera ao pousar
-      // ou agarrar outro cipó): garante o espaço de voo até o próximo cipó.
+      // Never re-grab the vine just released (only cleared on landing
+      // or grabbing another vine): keeps the flight gap to the next vine.
       if (vineData === this.ignoredVine) continue;
       vineData.vine.tip.getWorldPosition(tipPos);
 
@@ -540,8 +590,8 @@ export class Player {
       const distZ = Math.abs(this.z - tipPos.z);
       const distY = Math.abs((this.y + EYE_HEIGHT) - tipPos.y);
 
-      // Grab automatically when near the vine (janela generosa em Z para
-      // compensar o balanço rápido da ponta)!
+      // Grab automatically when near the vine (generous Z window to
+      // compensate for the fast tip swing)!
       if (distZ < 2.2 && distY < 2.4) {
         this.attachedVine = vineData;
         this.ignoredVine = null;
@@ -550,7 +600,7 @@ export class Player {
         this.vz = 0;
         audio.playTarzanYell();
 
-        // Show HUD prompt (só com a ajuda na tela ligada)
+        // Show HUD prompt (only with on-screen help enabled)
         if (getShowHelp()) {
           const prompt = document.getElementById('vine-prompt');
           if (prompt) prompt.classList.add('active');
@@ -572,8 +622,8 @@ export class Player {
     // Single action button: RELEASE VINE (or transfer to the next one)!
     if (this.actionJustPressed) {
       this.actionJustPressed = false;
-      // Transferência cipó→cipó: outro cipó ao alcance? Vai direto para
-      // ele, sem voo no meio. Senão, soltura normal com impulso.
+      // Vine-to-vine transfer: another vine within reach? Go straight to
+      // it, with no flight in between. Otherwise, normal release with momentum.
       if (this.tryVineTransfer(world)) return;
       this.releaseVine();
       return;
@@ -605,8 +655,8 @@ export class Player {
     let bestDist = Infinity;
     for (const vineData of world.activeVines) {
       if (vineData === this.attachedVine) continue;
-      // O cipó que acabou de soltar não vale (senão o pulo nunca solta de
-      // verdade); qualquer OUTRO cipó próximo é o "próximo cipó".
+      // The vine just released does not count (otherwise the jump would never truly let go);
+      // any OTHER nearby vine is the "next vine".
       if (vineData === this.ignoredVine) continue;
       if (!vineData.vine.tip) continue;
       vineData.vine.tip.getWorldPosition(tipPos);
@@ -649,8 +699,8 @@ export class Player {
     // (~3.8m away at 11 m/s), short enough to allow vine-to-vine mid-air
     // transfers on the double-vine crocodile screens.
     this.justReleasedVineTimer = 0.35;
-    // O cipó solto fica ignorado até o pouso: o voo pós-soltura nunca
-    // re-agarra o MESMO cipó, só o próximo.
+    // The released vine stays ignored until landing: the post-release flight never
+    // re-grabs the SAME vine, only the next one.
     this.ignoredVine = this.attachedVine;
     this.attachedVine = null;
     // Hands off the vine: hide the grip bar right away.
@@ -668,36 +718,37 @@ export class Player {
     // 1. Logs (Stationary & Rolling)
     for (const hazard of world.activeHazards) {
       if (hazard.type === 'log' || hazard.type === 'rolling_log') {
-        // Tronco caindo do céu, no poço ou aguardando a vez (invisível) não atropela
+        // Log falling from the sky, in the pit, or waiting its turn (invisible) — no collision
         if (hazard.falling || hazard.fallingIntoPit || hazard.waiting) continue;
         const distZ = Math.abs(this.z - hazard.z);
+        // Surface log doesn't hit the player 8m below in the tunnel
+        if (Math.abs(this.y - 0.45) > 3) continue;
         // If close and not jumping high enough
         if (distZ < 1.0 && this.y < 0.75) {
           if (this.tripCooldown <= 0) {
             this.tripCooldown = 0.6;
             this.isTripped = true;
             this.tripStandTimer = 0;
-            // Deixa Harry um pouco à frente do tronco para evitar uma nova
-            // colisão imediata quando ele se levanta.
+            // Push Harry slightly past the log to avoid an immediate re-collision when he gets up.
             this.z = hazard.z - 1.5;
             this.score = Math.max(0, this.score - 100);
             audio.playTrip();
-            // Para de andar e exige uma nova direção para levantar.
+            // Stop walking and require a fresh direction input to stand up.
             this.vz = 0;
             this.moveForward = false;
             this.moveBackward = false;
           }
         }
       } else if (hazard.type === 'fire') {
-        // Campfire: deadly if walking into it without jumping
+        // Campfire: deadly if walking into it without jumping (same level only)
         const distZ = Math.abs(this.z - hazard.z);
-        if (distZ < 1.1 && this.y < 0.9) {
+        if (distZ < 1.1 && Math.abs(this.y) < 0.9) {
           audio.playTrip();
           this.die('death.fire');
           return;
         }
       } else if (hazard.type === 'scorpion') {
-        // Scorpion: deadly if touching without jumping (mesmo nível só)
+        // Scorpion: deadly if touching without jumping (same level only)
         const distZ = Math.abs(this.z - hazard.z);
         const hy = hazard.baseY ?? 0.08;
         if (distZ < 1.1 && Math.abs(this.y - hy) < 0.9) {
@@ -712,9 +763,10 @@ export class Player {
     for (const treasure of world.activeTreasures) {
       if (!treasure.collected) {
         const distZ = Math.abs(this.z - treasure.z);
-        if (distZ < 1.4) {
+        // Only collect on the same level (not through the floor to the tunnel)
+        if (distZ < 1.4 && Math.abs(this.y - treasure.mesh.position.y) < 2) {
           treasure.collected = true;
-          // O tesouro pertence ao grupo da tela, não diretamente à cena.
+          // The treasure belongs to the screen group, not directly to the scene.
           treasure.mesh.removeFromParent();
           this.score += treasure.points;
           this.treasuresCollected++;
@@ -732,21 +784,21 @@ export class Player {
     // Off the vine: hide the grip bar (only shown while swinging).
     if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
 
-    // Queda de cara: o jogador tropeça e as mãos espalmam no chão
+    // Face-plant: player trips and hands splay flat on the ground
     if (isTripped) {
-      // Parar a câmera mais alto para que os braços não atravessem o chão
+      // Keep the camera higher so the arms don't clip through the floor
       const targetY = this.y + 1.2; 
       this.camera.position.set(0, THREE.MathUtils.lerp(this.camera.position.y, targetY, delta * 8), this.z);
-      // Câmera olha para o chão
+      // Camera looks down at the ground
       this.camera.rotation.x = THREE.MathUtils.lerp(this.camera.rotation.x, -0.8, delta * 6);
       this.camera.rotation.z = 0;
       this.camera.rotation.y = 0;
       if (this.arms) {
-        // Braços estendidos firmemente para frente para segurar a queda
-        // Posição levantada (-0.1) para simular o toque no chão
+        // Arms stretched firmly forward to brace the fall
+        // Raised position (-0.1) to simulate hands touching the ground
         this.arms.leftArm.position.set(-0.32, -0.1, -0.7);
         this.arms.rightArm.position.set(0.32, -0.1, -0.7);
-        // Rotação reta para apoiar as mãos
+        // Straight rotation to support the hands
         this.arms.leftArm.rotation.x = Math.PI / 2.5;
         this.arms.rightArm.rotation.x = Math.PI / 2.5;
       }
@@ -810,6 +862,10 @@ export class Player {
     this.deathReasonKey = reasonKey;
     this.lives--;
 
+    // Fade to black on death
+    const fade = document.getElementById('death-fade');
+    if (fade) fade.classList.add('on');
+
     // Detach from vine if attached
     if (this.attachedVine) {
       this.attachedVine = null;
@@ -831,8 +887,8 @@ export class Player {
     }
   }
 
-  // Solo seguro para respawn (puro, sem efeitos colaterais: não chama die()).
-  // Retorna false sobre água/piche/poço de saída/poço de escada/areia que abre e fecha.
+  // Safe ground check for respawn (pure, no side-effects: never calls die()).
+  // Returns false over water / tar / log-exit pit / ladder shaft / opening quicksand.
   isRespawnGroundSafe(world, z) {
     for (const hazard of world.activeHazards) {
       if (['quicksand', 'tarpit', 'water', 'ladder_shaft'].includes(hazard.type)) {
@@ -849,10 +905,10 @@ export class Player {
     return true;
   }
 
-  // Distância mínima de perigos físicos (troncos parados/rolando, fogo, escorpião).
+  // Minimum clearance from physical hazards (stationary/rolling logs, fire, scorpion).
   isRespawnClearOfHazards(world, z) {
     for (const hazard of world.activeHazards) {
-      // Perigo de outro nível (escorpião do túnel) não conta na superfície
+      // Hazard on a different level (tunnel scorpion) doesn't block surface respawn
       const hy = hazard.baseY ?? 0;
       if (Math.abs(hy) > 3) continue;
       if (hazard.type === 'rolling_log') {
@@ -864,7 +920,7 @@ export class Player {
     return true;
   }
 
-  // Procura um Z seguro perto da base: nunca sob um ponto de queda de tronco.
+  // Find a safe Z near the base: never under a falling log drop point.
   findSafeRespawnZ(world, baseZ, screenIndex) {
     const screenStartZ = -screenIndex * SCREEN_LENGTH;
     const screenEndZ = -(screenIndex + 1) * SCREEN_LENGTH;
@@ -878,25 +934,28 @@ export class Player {
         return z;
       }
     }
-    // Fallback: fica na base mesmo se tudo estiver ocupado (evita travar o jogo).
+    // Fallback: stay at base even if everything is occupied (prevents game lockup).
     return THREE.MathUtils.clamp(baseZ, minZ, maxZ);
   }
 
   respawn(world = null) {
     this.isDying = false;
+    // Fade in on respawn
+    const fade = document.getElementById('death-fade');
+    if (fade) fade.classList.remove('on');
     this.vy = 0;
     this.vz = 0;
     this.isGrounded = false;
     this.isTripped = false;
     this.tripStandTimer = 0;
     this.tripCooldown = 0;
-    // Sempre volta à superfície (nunca nasce no túnel)
+    // Always respawn on the surface (never born in the tunnel)
     this.inTunnel = false;
     this.climbing = null;
     this.climbGrace = 0;
 
-    // Respawn no último checkpoint (faixa atravessada); sem checkpoint,
-    // no começo da tela onde morreu (frente = -Z, começo = borda +Z).
+    // Respawn at the last checkpoint (last boundary strip crossed); if no checkpoint,
+    // at the start of the screen where the player died (forward = -Z, start = +Z edge).
     if (world) {
       let baseZ;
       if (this.checkpointZ !== null && this.checkpointZ < 8) {
@@ -906,14 +965,14 @@ export class Player {
         baseZ = -screenIndex * SCREEN_LENGTH + 6;
       }
       const screenIndex = Math.max(0, Math.floor(-baseZ / SCREEN_LENGTH));
-      // Desvia de troncos e demais perigos: nunca nasce embaixo de um
-      // tronco rolando nem sobre poços/areia movediça.
+      // Steer clear of logs and other hazards: never spawns under a falling log
+      // or on top of a pit / opening quicksand.
       this.z = this.findSafeRespawnZ(world, baseZ, screenIndex);
     } else {
-      // Fallback: recua 8 unidades
+      // Fallback: move back 8 units
       this.z += 8;
     }
-    // Cai do céu como no original: nasce lá no alto e a gravidade faz o resto.
+    // Drop from the sky like the original: spawns high up and gravity does the rest.
     this.y = this.RESPAWN_DROP_HEIGHT;
     this.respawnDrop = true;
     this.camera.position.set(0, this.y + EYE_HEIGHT, this.z);
@@ -928,7 +987,7 @@ export class Player {
     const newRecordEl = document.getElementById('new-record');
     const finalHighscore = document.getElementById('final-highscore');
 
-    // Recorde persistido no browser (só conta no fim do jogo, padrão arcade)
+    // High score persisted in the browser (only recorded at game over — arcade standard)
     const isNewRecord = submitScore(this.score);
 
     if (overlay) overlay.classList.remove('hidden');
@@ -967,5 +1026,8 @@ export class Player {
 
     const overlay = document.getElementById('gameover-overlay');
     if (overlay) overlay.classList.add('hidden');
+
+    const fade = document.getElementById('death-fade');
+    if (fade) fade.classList.remove('on');
   }
 }

@@ -21,7 +21,7 @@ export class HUD {
     this.initControls();
   }
 
-  // Troca ícone + texto preservando os spans (.btn-ico/.btn-txt) do botão.
+  // Swaps icon + text while preserving the button spans (.btn-ico/.btn-txt).
   setToggleLabel(btn, icon, text) {
     if (!btn) return;
     const ico = btn.querySelector('.btn-ico');
@@ -52,7 +52,7 @@ export class HUD {
     }
   }
 
-  // Reaplica os rótulos dos toggles no idioma atual (ex.: após trocar PT/EN)
+  // Reapplies toggle labels in the current language (e.g. after switching PT/EN)
   refreshOptionsLabels(player = null) {
     this.setToggleLabel(this.btnSound, audio.enabled ? '🔊' : '🔇', t(audio.enabled ? 'opt.soundOn' : 'opt.soundOff'));
     this.setToggleLabel(this.btnCrt, '📺', t(this.crtEnabled ? 'opt.crtOn' : 'opt.crtOff'));
@@ -83,7 +83,7 @@ export class HUD {
       this.livesEl.innerHTML = iconsHtml;
     }
 
-    // 4. Screen Number (fase 001..255 em loop)
+    // 4. Screen Number (phase 001..255 looping)
     if (this.screenEl) {
       const phase = ((currentScreenIndex % 255) + 255) % 255 + 1;
       this.screenEl.textContent = String(phase).padStart(3, '0');
@@ -94,7 +94,7 @@ export class HUD {
       this.treasuresEl.textContent = `${player.treasuresCollected}`;
     }
 
-    // 5b. Recorde (acima do contador de gemas)
+    // 5b. High score (above the gem counter)
     if (this.recordEl) {
       this.recordEl.textContent = String(getHighScore()).padStart(6, '0');
     }
@@ -107,7 +107,7 @@ export class HUD {
       return;
     }
 
-    // Mensagens de ajuda contextuais (ocultáveis na opção AJUDA NA TELA)
+    // Contextual help messages (hideable via the ON-SCREEN HELP option)
     if (!getShowHelp()) {
       if (this.crocPromptEl) this.crocPromptEl.className = 'hud-box croc-status';
       return;
@@ -159,7 +159,7 @@ export class HUD {
           }
         }
       } else {
-        // Sem crocodilo por perto: checa areia movediça, troncos caindo e escorpião.
+        // No crocodile nearby: check quicksand, falling logs and scorpion.
           let shown = false;
 
           if (world.activeOpeningPits && world.activeOpeningPits.length > 0) {
@@ -199,7 +199,7 @@ export class HUD {
             }
           }
 
-          // Troncos caindo/rolando por perto (zona de queda sinalizada no chão).
+          // Falling/rolling logs nearby (fall zone marked on the ground).
           if (!shown && world.activeRollingLogs && world.activeRollingLogs.length > 0) {
             let minLogDist = Infinity;
             for (const logData of world.activeRollingLogs) {
@@ -220,7 +220,7 @@ export class HUD {
             let minScorpionDist = Infinity;
             for (const h of world.activeHazards) {
               if (h.type === 'scorpion') {
-                // Só avisa escorpião do mesmo nível (túnel ou superfície)
+                // Only warn about a scorpion on the same level (tunnel or surface)
                 const hy = h.baseY ?? 0.08;
                 if (Math.abs(player.y - hy) > 3) continue;
                 const dist = Math.abs(player.z - h.z);

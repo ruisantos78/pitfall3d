@@ -55,7 +55,7 @@ class Game {
     const ambientLight = new THREE.AmbientLight(0xd8ecd0, 1.0);
     this.scene.add(ambientLight);
 
-    // Hemisphere fill for transições suaves céu-solo
+    // Hemisphere fill for smooth sky-to-ground transitions
     const hemiLight = new THREE.HemisphereLight(0xbfe3ff, 0x2e5a24, 0.55);
     this.scene.add(hemiLight);
 
@@ -98,7 +98,7 @@ class Game {
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     };
     window.addEventListener('resize', handleResize);
-    // No mobile a barra do navegador mostra/esconde sem disparar resize clássico
+    // On mobile, the browser bar appears/disappears without triggering a classic resize event
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleResize);
     }
@@ -129,7 +129,7 @@ class Game {
       });
     }
 
-    // Menu de opções: alterna as vistas sem iniciar o jogo
+    // Options menu: toggles views without starting the game
     const showOptions = (show) => {
       if (menuMain) menuMain.classList.toggle('hidden', show);
       if (menuOptions) menuOptions.classList.toggle('hidden', !show);
@@ -149,14 +149,14 @@ class Game {
       });
     }
 
-    // Cliques nos toggles (som/CRT/touch) não podem iniciar o jogo
+    // Clicks on toggles (sound/CRT/touch) must not start the game
     if (optionsMenu) {
       optionsMenu.addEventListener('click', (e) => {
         e.stopPropagation();
       });
     }
 
-    // Opções: idioma (PT/EN) e ajuda na tela, persistidos no browser
+    // Options: language (PT/EN) and on-screen help, persisted in the browser
     this.btnLangPt = document.getElementById('btn-lang-pt');
     this.btnLangEn = document.getElementById('btn-lang-en');
     this.btnHelp = document.getElementById('btn-help');
@@ -174,7 +174,7 @@ class Game {
       });
     }
 
-    // Aplica as preferências salvas (idioma + ajuda) logo na abertura
+    // Apply saved preferences (language + help) on startup
     this.refreshOptionsUI();
 
     if (startOverlay) {
@@ -204,7 +204,7 @@ class Game {
             this.restartGame();
           }
         } else {
-          // Com o menu de opções aberto, o teclado não inicia o jogo
+          // When the options menu is open, the keyboard must not start the game
           const optionsOpen = menuOptions && !menuOptions.classList.contains('hidden');
           if (!optionsOpen && ['Space', 'Enter', 'KeyW', 'ArrowUp'].includes(e.code)) {
             startGame();
@@ -219,7 +219,7 @@ class Game {
     this.refreshOptionsUI();
   }
 
-  // Sincroniza toda a UI de opções com as preferências salvas
+  // Syncs all options UI with saved preferences
   refreshOptionsUI() {
     applyStaticTexts();
     document.documentElement.lang = getLanguage() === 'pt' ? 'pt-BR' : 'en';
@@ -245,7 +245,7 @@ class Game {
     this.lastTime = performance.now();
   }
 
-  // Volta para o menu inicial (após o game over)
+  // Return to the main menu (after game over)
   backToMenu() {
     this.player.reset();
     this.rebuildWorld();
@@ -253,7 +253,7 @@ class Game {
     this.isRunning = false;
     this.lastTime = performance.now();
 
-    // Sempre reabre na vista principal do menu
+    // Always reopens on the main menu view
     const menuMain = document.getElementById('menu-main');
     const menuOptions = document.getElementById('menu-options');
     if (menuMain) menuMain.classList.remove('hidden');
@@ -265,7 +265,7 @@ class Game {
     this.refreshOptionsUI();
   }
 
-  // Remove as telas atuais e regenera do zero (uso no restart e na volta ao menu)
+  // Removes current screens and regenerates from scratch (used on restart and back-to-menu)
   rebuildWorld() {
     for (const [idx, screen] of this.world.screens.entries()) {
       this.scene.remove(screen.group);

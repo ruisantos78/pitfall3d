@@ -16,6 +16,7 @@ import { audio } from './audio.js';
 export const SCREEN_LENGTH = 60; // Length of each screen along Z axis
 export const PATH_WIDTH = 8;     // Width of corridor
 export const TUNNEL_FLOOR_Y = -8; // Underground tunnel floor (ladder screens)
+export const CEIL_TOP_Y = -3; // Cave ceiling top (landing on it is hit kill)
 
 export class World {
   constructor(scene) {
@@ -27,6 +28,8 @@ export class World {
     this.activeTreasures = [];
     this.activeHazards = [];
     this.animatedCampfires = [];
+    this.animatedTorches = [];
+    this.torchTime = 0;
     this.activeOpeningPits = [];
 
     // Base materials
@@ -41,24 +44,26 @@ export class World {
     // Shared tree template for cloning
     this.treeTemplate = createTreeModel(0.5);
 
-    // Poço sem fim: material preto visto por dentro (paredes do abismo)
+    // Bottomless pit: black material seen from inside (walls of the abyss)
     this.abyssMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide });
 
-    // Subterrâneo: terra das paredes do túnel e madeira da escada
+    // Underground: dirt for tunnel walls and wood for the ladder
     this.tunnelWallMaterial = new THREE.MeshLambertMaterial({ color: 0x4a3826 });
     this.tunnelFloorMaterial = new THREE.MeshLambertMaterial({ color: 0x5a4128 });
+    this.caveCeilMaterial = new THREE.MeshLambertMaterial({ color: 0x2e2418 });
     this.ladderMaterial = new THREE.MeshLambertMaterial({ color: 0x8a6a3a });
   }
 
-  // Poço sem fim: tubo preto profundo sem tampa para parecer abismo infinito
+  // Surface shaft: short black tube with a bottom (2.5m) to look deep
+  // - purposely shallow to NOT intersect the continuous tunnel below.
   addBottomlessShaft(group, centerZ, length, width = PATH_WIDTH) {
-    const depth = 40;
+    const depth = 2.5;
     const shaftGeo = new THREE.BoxGeometry(width, depth, length);
     const shaft = new THREE.Mesh(shaftGeo, this.abyssMaterial);
-    // Topo aberto logo abaixo do solo (y=-0.5), fundo a -40
+    // Open top just below the ground (y=-0.5), bottom at -3.0
     shaft.position.set(0, -0.5 - depth / 2, centerZ);
     group.add(shaft);
-    // Fundo preto absoluto para não ver o céu/fog lá embaixo
+    // Absolute black bottom so the sky/fog is not visible below
     const bottomGeo = new THREE.PlaneGeometry(width, length);
     const bottomMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
     const bottom = new THREE.Mesh(bottomGeo, bottomMat);
@@ -106,6 +111,7 @@ export class World {
     this.activeTreasures = this.activeTreasures.filter(t => t.screenIndex !== screen.index);
     this.activeHazards = this.activeHazards.filter(h => h.screenIndex !== screen.index);
     this.animatedCampfires = this.animatedCampfires.filter(c => c.screenIndex !== screen.index);
+    this.animatedTorches = this.animatedTorches.filter(t => t.screenIndex !== screen.index);
     this.activeOpeningPits = this.activeOpeningPits.filter(p => p.screenIndex !== screen.index);
   }
 
@@ -120,8 +126,19 @@ export class World {
     // 1. Build Ground and Corridor Trees
     this.buildGroundAndBorders(group, index, startZ, endZ, screenType);
 
-    // 2. Bandeirinhas de limite no início e fim da tela (visuais + checkpoints)
+    // 2. Boundary flags at the start and end of the screen (visuals + checkpoints)
     this.addBoundaryFlags(group, startZ, endZ);
+
+    // 2b. Section of the continuous tunnel on EVERY screen (endless underground)
+    this.addTunnel(group, index, startZ, endZ);
+    // 2c. Scorpion ONLY in tunnels without ladders (away from landings)
+    if (screenType !== 'HOLE_SINGLE' && screenType !== 'HOLE_TRIPLE') {
+      this.addScorpion(group, index, midZ, TUNNEL_FLOOR_Y + 0.08, 12);
+    }
+    // 2c. Cave ceiling (solid here; shaft screens will cut holes in it)
+    if (screenType !== 'HOLE_SINGLE' && screenType !== 'HOLE_TRIPLE') {
+      this.addCaveCeiling(group, startZ, endZ);
+    }
 
     // 3. Build Specific Screen Hazards / Features
     this.buildScreenFeatures(group, index, startZ, endZ, midZ, screenType);
@@ -145,7 +162,7 @@ export class World {
   }
 
   // Screen N = LFSR stepped (N mod 255) times right from seed $C4.
-  // Só existem 255 fases: a 256ª é a 1ª de novo (loop para frente).
+  // Only 255 phases exist: phase 256 wraps back to phase 1 (seamless forward loop).
   getAuthenticSpec(index) {
     const n = ((index % 255) + 255) % 255;
     let r = 0xc4;
@@ -159,8 +176,8 @@ export class World {
   // Deterministic Pitfall 2600 screen sequence (hybrid authentic+)
   getScreenType(index) {
     const spec = this.getAuthenticSpec(index);
-    // Cena 4 (jacarés): metade com cipó, metade só com jacarés (decide pelo
-    // treePat do LFSR — determinístico, o mapa nunca muda).
+    // Scene 4 (crocodiles): half with a vine, half croc-only (decided by LFSR treePat —
+    // deterministic, the map never changes between sessions).
     if (spec.sceneType === 4) {
       return spec.treePat % 2 === 0 ? 'CROCODILE_VINE' : 'CROCODILE_POND';
     }
@@ -169,7 +186,7 @@ export class World {
       'HOLE_TRIPLE',            // 1: three holes
       'TAR_PIT_VINE',           // 2: black pit + vine
       'QUICKSAND_VINE',         // 3: blue swamp + vine
-      'CROCODILE_VINE',         // 4: (tratado acima)
+      'CROCODILE_VINE',         // 4: (handled above)
       'DISAPPEARING_QUICKSAND', // 5: black quicksand + treasure
       'QUICKSAND_VINE_OPEN',    // 6: black quicksand + vine
       'BLUE_QUICKSAND',         // 7: blue quicksand (no vine)
@@ -210,20 +227,20 @@ export class World {
     // Build Ground Voxel Strips
     // If screen has a pit/pond in the middle, create a gap in ground
     const hasCentralHazard = ['QUICKSAND_VINE', 'TAR_PIT_VINE', 'CROCODILE_VINE', 'CROCODILE_POND', 'QUICKSAND_VINE_OPEN', 'BLUE_QUICKSAND'].includes(screenType);
-    // Meio-comprimento do lago central: 8m no lago dos jacarés (16m,
-    // cruzável só com o cipó) e 10m no lago do cipó e no piche (20m).
-    const centralHazardHalf = ['CROCODILE_VINE', 'CROCODILE_POND'].includes(screenType) ? 8 : 10;
+    // Half-length of the central lake: 10m for all scene types (20m total — vine lake,
+    // tar pit, and croc pond all share the same size; the vine behaves identically in all).
+    const centralHazardHalf = 10;
     const hazardStartZ = (startZ + endZ) / 2 + centralHazardHalf;
     const hazardEndZ = (startZ + endZ) / 2 - centralHazardHalf;
 
     const midZ = (startZ + endZ) / 2;
     const hasDisappearingPit = ['DISAPPEARING_QUICKSAND', 'BLUE_QUICKSAND'].includes(screenType);
     const pitCenterZ = midZ;
-    // Poço azul de saída dos troncos (1 fileira, ~1.5m). Só nas telas com
-    // rolling logs do mapa superior (obj 0..3, scene != 5).
+    // Blue exit pit for logs (1 row, ~1.5m). Only on screens with rolling logs
+    // in the upper map (obj 0..3, scene != 5).
     const specForGround = this.getAuthenticSpec(index);
-    const hasLogExitPit = !!specForGround && specForGround.sceneType !== 5 && specForGround.objectType <= 3;
-    const logExitPitCenterZ = startZ - 0.75;
+    const hasLogExitPit = !!specForGround && specForGround.sceneType !== 5 && specForGround.sceneType !== 4 && specForGround.objectType <= 3;
+    const logExitPitCenterZ = startZ - 1.5;
 
     const groundVoxels = [];
     const grassColor = '#306c24';
@@ -235,16 +252,16 @@ export class World {
       const worldZ = startZ - z;
       const isOverHazard = hasCentralHazard && (worldZ <= hazardStartZ && worldZ >= hazardEndZ);
       const isOverDisappearingPit = hasDisappearingPit && Math.abs(worldZ - pitCenterZ) <= 10.2;
-      // Shafts com escada (subterrâneo): 1 de 4m ou 3 de 3m
+      // Underground shafts (ladder): 1 of 4m or 3 of 3m
       const isOverShaft = (screenType === 'HOLE_SINGLE' && Math.abs(worldZ - midZ) <= 2.2) ||
         (screenType === 'HOLE_TRIPLE' &&
           (Math.abs(worldZ - (midZ + 12)) <= 1.7 || Math.abs(worldZ - midZ) <= 1.7 || Math.abs(worldZ - (midZ - 12)) <= 1.7));
-      // Saída dos troncos: 1 fileira em TODA a largura (inclusive o verde)
+      // Log exit row: 1 full-width row (including the green edges)
       const isOverLogExit = hasLogExitPit && Math.abs(worldZ - logExitPitCenterZ) <= 0.8;
       if (isOverLogExit) continue;
 
-      // Path corridor voxels (-3 to +3). A parte verde (|x|>=3) fica
-      // sempre visível nos demais pits — só o caminho central abre buraco.
+      // Path corridor voxels (-3 to +3). The green edges (|x|>=3) remain
+      // visible even over other pits — only the central path opens a gap.
       for (let x = -4; x <= 4; x++) {
         const isEdge = Math.abs(x) >= 3;
         if (!isEdge && (isOverHazard || isOverDisappearingPit || isOverShaft)) continue;
@@ -257,10 +274,10 @@ export class World {
     if (groundVoxels.length > 0) {
       const groundGeo = createVoxelGeometry(groundVoxels, 1.0, false);
       const groundMesh = new THREE.Mesh(groundGeo, this.groundMaterial);
-      // Voxels com center=false ocupam [x, x+1]: as colunas -4..4 geram
-      // [-4, +5]. O deslocamento -0.5 em X simetriza a faixa para [-4.5, +4.5],
-      // espelhando a borda direita na esquerda (duas linhas verdes cada lado)
-      // e centralizando o buraco do pit sobre o tampão.
+      // Voxels with center=false occupy [x, x+1]: columns -4..4 generate
+      // [-4, +5]. The -0.5 offset on X symmetrizes the strip to [-4.5, +4.5],
+      // mirroring the right edge on the left (two green lines per side)
+      // and centering the pit gap over the quicksand lid.
       groundMesh.position.set(-0.5, -1.0, startZ);
       groundMesh.receiveShadow = true;
       group.add(groundMesh);
@@ -270,8 +287,8 @@ export class World {
     const borderGeo = new THREE.BoxGeometry(16, 1, length);
     const borderMat = new THREE.MeshLambertMaterial({ color: 0x224e18, flatShading: true });
 
-    // Juntas de topo com a faixa do chão (que vai até ±4.5): sem sobreposição
-    // coplanar (evita z-fighting) em nenhum dos lados.
+    // Top joints flush with the ground strip (which goes to ±4.5): no coplanar
+    // overlap (avoids z-fighting) on either side.
     const leftBorder = new THREE.Mesh(borderGeo, borderMat);
     leftBorder.position.set(-12.5, -0.5, (startZ + endZ) / 2);
     group.add(leftBorder);
@@ -288,12 +305,12 @@ export class World {
     const scene = spec.sceneType;
     const treasureKinds = ['money', 'silver', 'gold', 'diamond'];
 
-    // Overlay ground object — SOMENTE mapa superior (pitfall.asm bits 0..2).
-    // O subterrâneo (túnel + escorpião) das scenes 0-1 é construído à parte.
-    // obj 7 = cobra da superfície: sem modelo próprio ainda, então não
-    // spawna nada (o escorpião mora no túnel).
-    // Troncos rolantes: pontos fixos e determinísticos em vagas sólidas
-    // (nunca no meio de lagos/buracos), sem aleatoriedade.
+    // Overlay ground object — surface map only (pitfall.asm bits 0..2).
+    // Underground (tunnel + scorpion) for scenes 0-1 is built separately.
+    // obj 7 = surface snake: no model yet, so nothing spawns
+    // (the scorpion lives in the tunnel).
+    // Rolling logs: fixed, deterministic drop points on solid ground
+    // (never inside lakes/pits), no randomness.
     const addOverlayObject = (z) => {
       if (scene === 5) return; // treasure handled with quicksand below
       if (obj <= 3) {
@@ -310,22 +327,24 @@ export class World {
       } else if (obj === 6) {
         this.addCampfire(group, index, z);
       }
-      // obj === 7 (cobra): omitido — só parte superior, sem escorpião na superfície.
+      // obj === 7 (snake): omitted — surface only, no scorpion on the surface.
     };
 
     switch (type) {
       case 'HOLE_SINGLE':
-        // Original: buraco com escada para o subterrâneo. Entre a pé para
-        // descer, pule por cima para continuar em cima.
+        // Original: hole with ladder to the underground. Walk in to descend,
+        // jump over to stay on the surface.
         this.addLadderShaft(group, index, midZ, 2);
-        this.addTunnel(group, index, startZ, endZ, [{ centerZ: midZ, half: 2 }]);
+        this.addCaveCeiling(group, startZ, endZ, [{ centerZ: midZ, half: 2 }]);
         addOverlayObject(midZ + 14);
         break;
 
       case 'HOLE_TRIPLE':
-        // Original: três buracos com escada.
-        [12, 0, -12].forEach((off) => this.addLadderShaft(group, index, midZ + off, 1.5));
-        this.addTunnel(group, index, startZ, endZ, [12, 0, -12].map((off) => ({ centerZ: midZ + off, half: 1.5 })));
+        // Original: three holes, but ladder ONLY in the middle one — the side holes drop straight in.
+        this.addLadderShaft(group, index, midZ + 12, 1.5, false);
+        this.addLadderShaft(group, index, midZ, 1.5, true);
+        this.addLadderShaft(group, index, midZ - 12, 1.5, false);
+        this.addCaveCeiling(group, startZ, endZ, [12, 0, -12].map((off) => ({ centerZ: midZ + off, half: 1.5 })));
         addOverlayObject(midZ + 20);
         break;
 
@@ -362,24 +381,17 @@ export class World {
 
       case 'CROCODILE_VINE': {
         // Original scene 4: croc pond (3 crocs) + vine.
-        // No ASM original, troncos (x=124) e jacarés (x=60) andam em faixas
-        // separadas — nunca sobrepostos. No corredor 1D, os obstáculos
-        // estáticos vão para a faixa de chão ANTES do lago (borda +8):
-        // nada parado dentro de midZ±8, para não bloquear o pulo entre jacarés.
-        // O lago tem 16m para dar para cruzar inteiro só com o cipó.
-        this.addWaterPond(group, index, midZ, 16);
+        // In the original ASM, logs (x=124) and crocs (x=60) run in separate lanes —
+        // never overlapping. In the 1D corridor, static obstacles go to the solid ground
+        // BEFORE the lake (edge +10): nothing stationary inside midZ±10 to avoid blocking
+        // croc-to-croc jumps. The lake is 20m like the vine-only lake (vine is identical in the middle).
+        this.addWaterPond(group, index, midZ, 20);
         this.addCrocodileTrio(group, index, midZ);
-        this.addVine(group, index, midZ + 3);
+        this.addVine(group, index, midZ);
         if (scene !== 5) {
-          if (obj <= 3) {
-            // Rolantes no ponto único de queda (cruzam o lago de forma
-            // transiente, como camadas independentes no original).
-            const count = [1, 2, 2, 3][obj];
-            for (let i = 0; i < count; i++) {
-              this.addRollingLog(group, index, startZ, endZ, i, count);
-            }
-            this.addLogExitPit(group, index, startZ);
-          } else if (obj === 4) {
+          // No rolling logs in the croc lake (stationary only): a rolling log
+          // crossing the lake would break the croc-hopping mechanic.
+          if (obj === 4) {
             this.addStationaryLog(group, index, midZ + 19);
           } else if (obj === 5) {
             this.addStationaryLog(group, index, midZ + 19);
@@ -393,17 +405,12 @@ export class World {
       }
 
       case 'CROCODILE_POND': {
-        // Lago só com jacarés (sem cipó): travessia pulando de jacaré em jacaré.
-        this.addWaterPond(group, index, midZ, 16);
+        // Croc lake without a vine (croc-only): cross by hopping from croc to croc.
+        this.addWaterPond(group, index, midZ, 20);
         this.addCrocodileTrio(group, index, midZ);
         if (scene !== 5) {
-          if (obj <= 3) {
-            const count = [1, 2, 2, 3][obj];
-            for (let i = 0; i < count; i++) {
-              this.addRollingLog(group, index, startZ, endZ, i, count);
-            }
-            this.addLogExitPit(group, index, startZ);
-          } else if (obj === 4) {
+          // No rolling logs here either (stationary only).
+          if (obj === 4) {
             this.addStationaryLog(group, index, midZ + 19);
           } else if (obj === 5) {
             this.addStationaryLog(group, index, midZ + 19);
@@ -433,7 +440,7 @@ export class World {
   // --- Hazard Builders ---
 
   addStationaryLog(group, screenIndex, z) {
-    // Tronco parado só na pista amarela (28 voxels ≈ 5m, sem cobrir o verde).
+    // Stationary log only on the yellow track (28 voxels ≈ 5m, no green coverage).
     const log = createLogModel(0.18, 28);
     log.position.set(0, 0.45, z);
     group.add(log);
@@ -448,7 +455,7 @@ export class World {
     });
   }
 
-  // Textura listrada de alerta (amarelo/preto) para a sinalização de queda de troncos.
+  // Warning stripe texture (yellow/black) for the falling-log ground marker.
   makeHazardStripeTexture() {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
@@ -470,8 +477,8 @@ export class World {
     return tex;
   }
 
-  // Sinalização de alerta no chão onde o tronco vai cair: disco listrado +
-  // anel vermelho pulsante, bem visível de longe para o jogador frear a tempo.
+  // Ground warning marker for where the log will land: striped disc +
+  // pulsing red ring, clearly visible from a distance so the player can brake in time.
   createFallingLogWarning(z) {
     const group = new THREE.Group();
     if (!this.hazardStripeTex) {
@@ -504,24 +511,24 @@ export class World {
     return { group, disc, ring, discMat, ringMat };
   }
 
-  // Ciclo exato de um tronco: queda do céu (~0.88s) + rolagem 52m a 6.5m/s
-  // (8.0s) + queda no poço (~0.91s) ≈ 9.8s. Como a geometria é idêntica em
-  // toda tela, o ciclo é constante e o revezamento nunca deforma.
+  // Exact cycle for one log: sky drop (~0.88s) + rolling 52m at 6.5m/s
+  // (8.0s) + pit fall (~0.91s) ≈ 9.8s. Because geometry is identical every screen,
+  // the cycle is constant and the staggered timing never drifts.
   static ROLLING_CYCLE = 9.8;
 
   addRollingLog(group, screenIndex, startZ, endZ, idx, count) {
-    // Tronco largo só na pista amarela (28 voxels ≈ 5m, sem cobrir o verde).
+    // Wide log only on the yellow track (28 voxels ≈ 5m, no green coverage).
     const log = createLogModel(0.18, 28);
     const dropZ = this.rollingDropZ(endZ);
-    // Queda do céu sempre do ponto único da tela; os troncos revezam nele
-    // no tempo (idx/count do ciclo), sem aleatoriedade.
+    // Sky drop always from the screen's single drop point; logs stagger in time
+    // (idx/count of cycle), with no randomness.
     const spawnY = 12;
     log.position.set(0, spawnY, dropZ);
     log.visible = false;
     group.add(log);
 
-    // Sinalização de alerta no chão: disco listrado + anel vermelho pulsante.
-    // Cresce e pisca enquanto o tronco despenca, some ao tocar o solo.
+    // Ground warning marker: striped disc + pulsing red ring.
+    // Grows and flashes as the log falls, disappears upon touching the ground.
     const alert = this.createFallingLogWarning(dropZ);
     alert.group.visible = false;
     group.add(alert.group);
@@ -536,11 +543,11 @@ export class World {
       alertDiscMat: alert.discMat,
       alertRingMat: alert.ringMat,
       z: dropZ,
-      spawnZ: dropZ, // ponto único de retorno — sem Math.random
+      spawnZ: dropZ, // single return point — no Math.random
       y: spawnY,
       spawnY,
       vy: 0,
-      waiting: true, // aguardando sua vez no revezamento
+      waiting: true, // waiting its turn in the staggered queue
       clock: 0,
       nextDrop: (idx * World.ROLLING_CYCLE) / count,
       falling: false,
@@ -549,7 +556,7 @@ export class World {
       maxFallHeight: spawnY - 0.45,
       startZ,
       endZ,
-      exitPitZ: startZ, // poço azul do início da tela
+      exitPitZ: startZ - 1.5, // center of the spike exit pit
       speed: 6.5, // units/sec towards player (+Z direction)
       radius: 1.2,
     };
@@ -558,10 +565,10 @@ export class World {
     this.activeHazards.push(logData);
   }
 
-  // Bandeirinhas de limite no início e fim de cada tela: marcos visuais
-  // de fronteira e checkpoints (volte a elas ao morrer). Alternam o lado
-  // (direita no início, esquerda no fim) para não sobrepor na fronteira,
-  // com o pano sempre espelhado para dentro (lado da pista, longe das árvores).
+  // Boundary flags at the start and end of each screen: visual border markers
+  // and checkpoints (respawn returns here). Alternates sides (right at start,
+  // left at end) so they don't overlap at borders, with the cloth always facing
+  // inward (towards the track, away from the trees).
   addBoundaryFlags(group, startZ, endZ) {
     const poleGeo = new THREE.BoxGeometry(0.14, 2.6, 0.14);
     const flagGeo = new THREE.BoxGeometry(0.95, 0.55, 0.08);
@@ -580,19 +587,21 @@ export class World {
     }
   }
 
-  // Ponto único de queda dos troncos rolantes por tela: 8m para dentro do
-  // fim da tela (longe do checkpoint da fronteira), sempre em chão sólido
-  // (fora de lagos/buracos) e longe dos tesouros centrais. Cada tela com
-  // troncos móveis tem UM só ponto — os troncos revezam nele no tempo.
+  // Single drop point for rolling logs per screen: 8m from the end of the screen
+  // (away from the boundary checkpoint), always on solid ground
+  // (outside lakes/pits) and away from central treasures. Each screen with
+  // rolling logs has ONE drop point — the logs stagger through it over time.
   rollingDropZ(endZ) {
     return endZ + 8;
   }
 
   addLogExitPit(group, screenIndex, startZ, length = 1.5) {
-    const centerZ = startZ - length / 2;
-    // Buraco preto curto (1.5m = comprimento do tronco) em TODA a largura
-    // da via, incluindo o verde. O tronco cai nele e volta a despencar do
-    // céu no seu ponto único de origem.
+    // Exact center on a voxel row (startZ-1.5): the ground cutout has
+    // 1 row = 1.5m = the pit width, with no gaps down to the subsurface.
+    const centerZ = startZ - 1.5;
+    // Short black hole (1.5m = log width) spanning the FULL trail width
+    // (including the green edges). The log falls in and drops back from the sky
+    // at its single spawn point.
     const pitWidth = PATH_WIDTH + 1;
     const pitGeo = new THREE.BoxGeometry(pitWidth, 0.2, length);
     const pitMesh = new THREE.Mesh(pitGeo, this.pitMaterial);
@@ -600,60 +609,63 @@ export class World {
     group.add(pitMesh);
     this.addBottomlessShaft(group, centerZ, length, pitWidth);
 
-    // Espetos no fundo: deixam claro que ali não se deve entrar.
+    // Spikes at the bottom: make it clear this area is not to be entered.
     if (!this.spikeMaterial) {
       this.spikeMaterial = new THREE.MeshLambertMaterial({ color: 0x9aa0a8 });
     }
     const spikeGeo = new THREE.ConeGeometry(0.32, 2.0, 6);
     for (let x = -4; x <= 4; x += 1) {
       const spike = new THREE.Mesh(spikeGeo, this.spikeMaterial);
-      spike.position.set(x, -1.5, centerZ);
+      spike.position.set(x, -1.0, centerZ); // tips at 0.0, at the mouth of the pit
       group.add(spike);
     }
 
     this.activeHazards.push({
       type: 'log_exit_pit',
       screenIndex,
-      minZ: startZ - length,
-      maxZ: startZ,
+      minZ: centerZ - length / 2,
+      maxZ: centerZ + length / 2,
       centerZ,
     });
   }
 
-  // Poço com escada para o subterrâneo (telas HOLE_*): paredes de terra do
-  // nível 0 até o túnel + escada de madeira na parede de saída (-Z).
-  addLadderShaft(group, screenIndex, centerZ, half) {
-    const top = 0.2;
-    const bottom = TUNNEL_FLOOR_Y;
-    const h = top - bottom;
-    const midY = (top + bottom) / 2;
+  // Underground pit (HOLE_* screens): dirt walls from level 0 down to the tunnel.
+  // As in the original, NOT every pit has a ladder: only the middle one has wooden
+  // rungs (up and down); the side ones drop straight in.
+  addLadderShaft(group, screenIndex, centerZ, half, hasLadder = true) {
+    // No surrounding walls — just the wooden ladder hanging in the gap.
+    // Siding in the ceiling colour closes the gap between the track floor (bottom -1)
+    // and the cave ceiling (top -3) around the hole.
+    const holeLen = half * 2 + 1;
+    const bandSideGeo = new THREE.BoxGeometry(0.3, 2, holeLen + 0.6);
+    for (const x of [-2.65, 2.65]) {
+      const band = new THREE.Mesh(bandSideGeo, this.caveCeilMaterial);
+      band.position.set(x, -2.0, centerZ);
+      group.add(band);
+    }
+    const bandEndGeo = new THREE.BoxGeometry(5.6, 2, 0.3);
+    for (const z of [centerZ - half - 0.65, centerZ + half + 0.65]) {
+      const band = new THREE.Mesh(bandEndGeo, this.caveCeilMaterial);
+      band.position.set(0, -2.0, z);
+      group.add(band);
+    }
 
-    const sideGeo = new THREE.BoxGeometry(0.5, h, half * 2 + 0.5);
-    for (const x of [-2.75, 2.75]) {
-      const wall = new THREE.Mesh(sideGeo, this.tunnelWallMaterial);
-      wall.position.set(x, midY, centerZ);
-      group.add(wall);
-    }
-    const endGeo = new THREE.BoxGeometry(6.0, h, 0.5);
-    for (const z of [centerZ - half - 0.25, centerZ + half + 0.25]) {
-      const wall = new THREE.Mesh(endGeo, this.tunnelWallMaterial);
-      wall.position.set(0, midY, z);
-      group.add(wall);
-    }
-
-    // Escada: 2 trilhos + degraus na parede de saída
-    const railGeo = new THREE.BoxGeometry(0.12, h - 0.5, 0.12);
-    const rungGeo = new THREE.BoxGeometry(1.0, 0.09, 0.09);
-    const ladderZ = centerZ - half + 0.45;
-    for (const x of [-0.5, 0.5]) {
-      const rail = new THREE.Mesh(railGeo, this.ladderMaterial);
-      rail.position.set(x, midY, ladderZ);
-      group.add(rail);
-    }
-    for (let y = -0.5; y >= TUNNEL_FLOOR_Y + 0.6; y -= 0.8) {
-      const rung = new THREE.Mesh(rungGeo, this.ladderMaterial);
-      rung.position.set(0, y, ladderZ);
-      group.add(rung);
+    // Ladder: 2 rails + rungs descending in the gap (middle pit only).
+    // Doesn't reach the bottom: the two lowest rungs have been removed.
+    if (hasLadder) {
+      const railGeo = new THREE.BoxGeometry(0.12, 5.5, 0.12);
+      const rungGeo = new THREE.BoxGeometry(1.0, 0.09, 0.09);
+      const ladderZ = centerZ - half + 0.45;
+      for (const x of [-0.5, 0.5]) {
+        const rail = new THREE.Mesh(railGeo, this.ladderMaterial);
+        rail.position.set(x, -3.0, ladderZ);
+        group.add(rail);
+      }
+      for (let y = -0.5; y >= TUNNEL_FLOOR_Y + 2.2; y -= 0.8) {
+        const rung = new THREE.Mesh(rungGeo, this.ladderMaterial);
+        rung.position.set(0, y, ladderZ);
+        group.add(rung);
+      }
     }
 
     this.activeHazards.push({
@@ -663,14 +675,44 @@ export class World {
       maxZ: centerZ + half,
       centerZ,
       half,
+      hasLadder,
     });
   }
 
-  // Túnel subterrâneo de ponta a ponta da tela: chão, paredes laterais,
-  // paredes de topo (sem passagem para telas vizinhas), luz e escorpião.
-  // `shafts` = [{centerZ, half}] dos poços com escada: o escorpião patrulha
-  // o maior trecho livre — NUNCA anda embaixo de saída de escada.
-  addTunnel(group, screenIndex, startZ, endZ, shafts = []) {
+  // Continuous underground tunnel running through the entire game: every screen
+  // has its own stretch (floor, side walls, and a point light) with no end walls —
+  // the underground is seamless and the player can walk indefinitely, climbing
+  // back up at any ladder shaft.
+  // Surface pits above are intentionally shallow (2.5m) so they never invade the corridor.
+  // Cave ceiling at y=-3 with gaps ONLY over ladder shafts ('shaftCuts'): hides the
+  // surface world, but lets light and the player pass through via the ladders.
+  // Called for screens WITH pits; for all other screens the ceiling has no gaps.
+  addCaveCeiling(group, startZ, endZ, shaftCuts = []) {
+    const cuts = shaftCuts
+      .map((s) => [s.centerZ - s.half - 0.5, s.centerZ + s.half + 0.5])
+      .sort((a, b) => a[0] - b[0]);
+    let cur = endZ;
+    const closeSeg = (hi) => {
+      if (hi - cur >= 0.3) {
+        const seg = new THREE.Mesh(
+          new THREE.BoxGeometry(PATH_WIDTH + 1, 0.5, hi - cur),
+          this.caveCeilMaterial
+        );
+        seg.position.set(0, -3.25, (cur + hi) / 2);
+        group.add(seg);
+      }
+      cur = hi;
+    };
+    for (const [c0, c1] of cuts) {
+      closeSeg(Math.min(c0, startZ));
+      cur = Math.max(cur, c1);
+    }
+    closeSeg(startZ);
+  }
+
+  // Tunnel stretch (floor, side walls and light) — every screen has its own,
+  // forming the continuous seamless corridor. Ceiling goes in `addCaveCeiling`.
+  addTunnel(group, screenIndex, startZ, endZ, floorY = -8) {
     const midZ = (startZ + endZ) / 2;
     const length = SCREEN_LENGTH;
 
@@ -688,36 +730,46 @@ export class World {
       group.add(wall);
     }
 
-    const endGeo = new THREE.BoxGeometry(PATH_WIDTH + 1.5, 8, 0.5);
-    for (const z of [startZ - 0.3, endZ + 0.3]) {
-      const wall = new THREE.Mesh(endGeo, this.tunnelWallMaterial);
-      wall.position.set(0, TUNNEL_FLOOR_Y + 4, z);
-      group.add(wall);
-    }
-
     const lamp = new THREE.PointLight(0xffb060, 25, 50);
     lamp.position.set(0, TUNNEL_FLOOR_Y + 3.5, midZ);
     group.add(lamp);
 
-    // Maior intervalo do túnel livre de poços (margem 2m de cada lado)
-    const lo = endZ + 3;
-    const hi = startZ - 3;
-    const blocks = shafts
-      .map((s) => [s.centerZ - s.half - 2, s.centerZ + s.half + 2])
-      .sort((a, b) => a[0] - b[0]);
-    let bestLo = lo;
-    let bestHi = lo;
-    let cur = lo;
-    for (const [b0, b1] of [...blocks, [hi, hi]]) {
-      if (b0 - cur > bestHi - bestLo) {
-        bestLo = cur;
-        bestHi = b0;
-      }
-      cur = Math.max(cur, b1);
+    // Tunnel torches marking underground checkpoints (alternate sides like the
+    // surface flags; brazier only, no dedicated light of their own).
+    const bracketGeo = new THREE.BoxGeometry(0.16, 0.16, 0.5);
+    const stickGeo = new THREE.BoxGeometry(0.12, 0.9, 0.12);
+    const flameGeo = new THREE.ConeGeometry(0.2, 0.55, 6);
+    const emberGeo = new THREE.ConeGeometry(0.1, 0.3, 6);
+    const bracketMat = new THREE.MeshLambertMaterial({ color: 0x2a2018 });
+    const stickMat = new THREE.MeshLambertMaterial({ color: 0x6a4a28 });
+    const flameMat = new THREE.MeshBasicMaterial({ color: 0xff7018 });
+    const emberMat = new THREE.MeshBasicMaterial({ color: 0xffd23f });
+    for (const [x, z] of [[4.3, startZ - 2], [-4.3, endZ + 2]]) {
+      const torch = new THREE.Group();
+      const bracket = new THREE.Mesh(bracketGeo, bracketMat);
+      bracket.rotation.y = Math.PI / 2;
+      torch.add(bracket);
+      const stick = new THREE.Mesh(stickGeo, stickMat);
+      stick.position.y = 0.4;
+      stick.rotation.z = x > 0 ? -0.15 : 0.15;
+      torch.add(stick);
+      const flame = new THREE.Mesh(flameGeo, flameMat);
+      flame.position.y = 1.05;
+      torch.add(flame);
+      const ember = new THREE.Mesh(emberGeo, emberMat);
+      ember.position.y = 1.0;
+      torch.add(ember);
+      const glow = new THREE.PointLight(0xff8030, 6, 11);
+      glow.position.y = 1.1;
+      torch.add(glow);
+      torch.position.set(x, TUNNEL_FLOOR_Y + 2.5, z);
+      group.add(torch);
+      this.animatedTorches.push({
+        screenIndex,
+        light: glow,
+        seed: Math.random() * 10,
+      });
     }
-    const patrolBase = (bestLo + bestHi) / 2;
-    const patrolRange = Math.max(1.5, Math.min(12, (bestHi - bestLo) / 2 - 1));
-    this.addScorpion(group, screenIndex, patrolBase, TUNNEL_FLOOR_Y + 0.08, patrolRange);
   }
 
   addTarPit(group, screenIndex, centerZ, length = 20) {
@@ -725,7 +777,7 @@ export class World {
     const pitMesh = new THREE.Mesh(pitGeo, this.pitMaterial);
     pitMesh.position.set(0, -0.6, centerZ);
     group.add(pitMesh);
-    // Abismo negro sem fim abaixo da superfície
+    // Endless black abyss below the surface
     this.addBottomlessShaft(group, centerZ, length);
 
     this.activeHazards.push({
@@ -741,7 +793,7 @@ export class World {
     const pit = createOpeningQuicksandModel(0.45, 12);
     pit.group.position.set(0, -0.45, z);
     group.add(pit.group);
-    // Abismo negro sem fim (20m de extensão, como o lago do cipó) abaixo do tampão móvel
+    // Endless black abyss (20m wide, like the vine lake) below the moving lid
     this.addBottomlessShaft(group, z, 20.4);
 
     const pitData = {
@@ -751,18 +803,18 @@ export class World {
       segments: pit.segments,
       numSegments: pit.segments.length,
       z: z,
-      radius: 10, // 20 metros totais (como o lago do cipó) - impossível pular por cima!
+      radius: 10, // 20m total (same as the vine lake) — impossible to jump over when open!
       timer: Math.random() * 2.0,
       isOpen: false,
       openCount: 0,
-      phase: 'closed', // closed | opening | open | closing (fecho a partir da borda do herói)
+      phase: 'closed', // closed | opening | open | closing (closes from the player's edge)
       wasOpen: false,
       rumblePlayed: false,
-      // Ciclo (segundos): pausa fechado e sólido (0.5s) -> abrindo em onda
-      // entrada->saída (1.8s) -> totalmente aberto (5.0s) -> fechando em onda
-      // a partir da borda do herói, entrada->saída (1.8s, ~11.1 m/s vs 9.0 do
-      // Harry: a onda é visivelmente mais rápida que o herói, garantindo segurança).
-      // Total: 9.1s, aberto na maior parte do tempo.
+      // Cycle (seconds): closed-solid pause (0.5s) → opening wave entry→exit (1.8s)
+      // → fully open (5.0s) → closing wave from the player's edge, entry→exit
+      // (1.8s, ~11.1 m/s vs Harry's 9.0: wave is visibly faster than the player,
+      // guaranteeing safety).
+      // Total: 9.1s, open for most of the cycle.
       closedDur: 0.5,
       openingDur: 1.8,
       openDur: 5.0,
@@ -773,16 +825,16 @@ export class World {
     this.activeHazards.push(pitData);
   }
 
-  // Areia movediça: encontra a seção sob a posição Z do jogador
+  // Quicksand pit: returns the segment currently under the player's Z position
   getQuicksandSegmentAt(pitData, z) {
-    const rel = z - pitData.z; // + = lado da entrada (herói), - = lado da saída
+    const rel = z - pitData.z; // + = entry side (player), - = exit side
     for (const s of pitData.segments) {
       if (rel <= s.maxOffset && rel >= s.minOffset) return s;
     }
     return null;
   }
 
-  // Areia movediça: a seção sob os pés está aberta?
+  // Quicksand pit: is the section under the player's feet currently open?
   isQuicksandOpenAt(pitData, z) {
     if (Math.abs(z - pitData.z) >= pitData.radius) return false;
     const seg = this.getQuicksandSegmentAt(pitData, z);
@@ -795,7 +847,7 @@ export class World {
     const waterMesh = new THREE.Mesh(waterGeo, this.waterMaterial);
     waterMesh.position.set(0, -0.6, centerZ);
     group.add(waterMesh);
-    // Abismo negro sem fim abaixo do lago
+    // Endless black abyss below the lake
     this.addBottomlessShaft(group, centerZ, length);
 
     this.activeHazards.push({
@@ -808,15 +860,14 @@ export class World {
   }
 
   addCrocodileTrio(group, screenIndex, centerZ) {
-    // 3 jacarés reduzidos (0.22) ao longo do lago de 16m (X=0, espaçados em Z).
-    // Cada jacaré cobre [z-1.3, z+3.2] (zona segura nas costas vai até z+0.65).
-    // Espaçamento de 6.5m (pulo máximo = 6.75m): dá para ir de jacaré em
-    // jacaré, e o lago inteiro dá para cruzar só com o cipó.
-    const offsetsZ = [5.5, -1.0, -7.5];
+    // 3 scaled-down crocs (0.22) evenly spaced in a 20m lake.
+    // Each croc covers [z-1.2, z+2.8] (safe zone on the back/scales).
+    // 6.5m spacing (max jump = 6.75m): equal jumps from croc to croc.
+    const offsetsZ = [6.5, 0, -6.5];
     offsetsZ.forEach((offset, idx) => {
       const croc = createCrocodileModel(0.22);
       const zPos = centerZ + offset;
-      // Topo em Y=0.35 (3 voxels do modelo a 0.22 = 0.66, menos 0.31).
+      // Top at Y=0.35 (3 model voxels at 0.22 = 0.66, minus 0.31).
       croc.mesh.position.set(0, -0.31, zPos);
       croc.mesh.rotation.y = 0; // Snouts point towards incoming player (+Z)!
       group.add(croc.mesh);
@@ -833,8 +884,8 @@ export class World {
   }
 
   addVine(group, screenIndex, centerZ, phaseTime = null) {
-    // Cipó alto mas alcançável: ponta em ~3.3m do solo (só agarra no ar,
-    // pulando — parado no chão nunca agarra, garantido no checkVineGrab).
+    // Tall but reachable vine: tip at ~3.3m above ground (only grabbable in the air
+    // while jumping — standing still on the ground never grabs, guaranteed in checkVineGrab).
     const vine = createVineModel(24, 0.28);
     // Position pivot high up in canopy overhead
     vine.pivot.position.set(0, 9.0, centerZ);
@@ -886,7 +937,7 @@ export class World {
 
   addTreasure(group, screenIndex, z, type = 'gold') {
     const treasure = createTreasureModel(type, 0.22);
-    // O anel de diamante é erguido para o aro dourado não parecer afundado no solo
+    // The diamond ring is lifted slightly so the golden band doesn't look sunken into the ground
     const liftY = type === 'diamond' ? 0.3 : 0.05;
     treasure.mesh.position.set(0, liftY, z);
     group.add(treasure.mesh);
@@ -952,12 +1003,13 @@ export class World {
       }
     });
 
-    // 3. Update Rolling Logs (ponto único de queda por tela: os troncos
-    // revezam nele no tempo via relógio — tudo determinístico, sem
-    // aleatoriedade: queda do céu, rolagem até o poço azul, queda no poço).
+    // 3. Update Rolling Logs (single drop point per screen: logs stagger through it
+    // over time via a clock — fully deterministic, no randomness: drop from sky,
+    // roll to the spike pit, where the log CEASES TO EXIST (disappears into the spikes,
+    // does not continue falling).
     this.activeRollingLogs.forEach(l => {
       l.clock += delta;
-      // Aguardando sua vez no revezamento (invisível no alto).
+      // Waiting its turn in the staggered queue (invisible up in the sky).
       if (l.waiting) {
         if (l.clock >= l.nextDrop) {
           l.nextDrop += World.ROLLING_CYCLE;
@@ -970,11 +1022,12 @@ export class World {
           l.mesh.position.z = l.z;
           l.mesh.position.y = l.y;
           l.landingShadow.visible = true;
+          if (!this.activeHazards.includes(l)) this.activeHazards.push(l);
         } else {
           return;
         }
       }
-      // Queda do céu antes de rolar: gravidade até o solo
+      // Sky drop before rolling: gravity until the log hits the ground
       if (l.falling) {
         l.vy -= 30 * delta;
         l.y += l.vy * delta;
@@ -983,7 +1036,7 @@ export class World {
           0,
           1,
         );
-        // Sinalização pulsante: cresce com a aproximação + pisca vermelho.
+        // Pulsing warning marker: grows as the log approaches + flashes red.
         const pulse = (Math.sin(performance.now() * 0.012) + 1) / 2;
         const warnScale = 0.3 + fallProgress * 0.85;
         l.landingShadow.visible = true;
@@ -1003,9 +1056,11 @@ export class World {
           l.landingShadow.visible = false;
         }
         l.mesh.position.y = l.y;
-        l.mesh.rotation.x += delta * 3; // giro suave durante a queda
+        l.mesh.rotation.x += delta * 3; // gentle spin during the fall
       } else if (l.fallingIntoPit) {
-        // O tronco chega ao poço azul e cai nele.
+        // The log reaches the spike pit and is impaled: CEASES TO EXIST immediately
+        // (does not continue falling) and waits its next turn in the queue
+        // (nextDrop was already scheduled +1 cycle at drop time).
         l.vy -= 30 * delta;
         l.y += l.vy * delta;
         l.z = l.exitPitZ;
@@ -1013,23 +1068,26 @@ export class World {
         l.mesh.position.z = l.z;
         l.mesh.rotation.x += delta * 10;
 
-        if (l.y <= -12) {
-          // Caiu no poço: some e aguarda sua próxima vez no revezamento
-          // (nextDrop já agendado — o ciclo exato se mantém para sempre).
+        if (l.y <= -0.6) {
+          // Impaled: disappears and waits for next turn (nextDrop already scheduled
+          // at drop time — the exact cycle is maintained forever).
           l.waiting = true;
           l.falling = false;
           l.fallingIntoPit = false;
           l.mesh.visible = false;
           l.landingShadow.visible = false;
+          const hi = this.activeHazards.indexOf(l);
+          if (hi >= 0) this.activeHazards.splice(hi, 1);
         }
       } else {
         l.mesh.position.y = l.groundY;
         l.mesh.rotation.x += delta * 12; // rolling animation
-        // Moves towards player (+Z direction) — só rola após tocar o solo
+        // Moves towards player (+Z direction) — only rolls after touching the ground
         l.z += l.speed * delta;
         l.mesh.position.z = l.z;
 
-        // Ao chegar ao poço azul, cai nele em vez de reaparecer de repente.
+        // When the log reaches the exit pit, it gets impaled instead of
+        // teleporting back immediately.
         if (l.z >= l.exitPitZ) {
           l.z = l.exitPitZ;
           l.y = l.groundY;
@@ -1038,6 +1096,13 @@ export class World {
           l.landingShadow.visible = false;
         }
       }
+    });
+
+    // 4b. Tunnel torch flicker (small, trembling warm light)
+    this.torchTime += delta;
+    this.animatedTorches.forEach(t => {
+      t.light.intensity = 6 + Math.sin(this.torchTime * 13 + t.seed) * 1.3 +
+        Math.sin(this.torchTime * 29 + t.seed * 2) * 0.7;
     });
 
     // 4. Update Animated Campfires (Core, multi-tongue flames, rising embers, flickering light)
@@ -1088,7 +1153,7 @@ export class World {
 
     // 5. Update Scorpions (scuttle back and forth along trail with step bounce & light pulse)
     this.activeHazards.filter(h => h.type === 'scorpion').forEach(s => {
-      // Patrulha lenta e constante (~2.2 m/s no pico): dá tempo de pular por cima
+      // Slow, steady patrol (~2.2 m/s peak): gives the player time to jump over.
       s.time += delta * (2.2 / (s.patrolRange || 3));
       s.mesh.position.z = s.baseZ + Math.sin(s.time) * (s.patrolRange || 3);
       s.z = s.mesh.position.z;
@@ -1110,11 +1175,11 @@ export class World {
       }
     });
 
-    // 7. Update Disappearing Quicksand Pits (ciclo por seção)
-    // Fases: pausa fechado e sólido (0.5s) -> abrindo em onda da entrada até
-    // a saída (2.2s) -> totalmente aberto (5.0s) -> fechando em onda a partir
-    // da borda do herói, entrada->saída (2.2s, para correr junto com a onda).
-    // Total: 9.9s. Cada seção parte-se ao meio (X) e afunda (Y).
+    // 7. Update Disappearing Quicksand Pits (per-section cycle)
+    // Phases: closed-solid pause (0.5s) → opening wave from entry to exit
+    // (2.2s) → fully open (5.0s) → closing wave from the player's edge,
+    // entry→exit (2.2s, surf alongside the wave to cross).
+    // Total: 9.9s. Each section splits in half (X) and sinks (Y).
     this.activeOpeningPits.forEach(p => {
       p.timer += delta;
       const n = p.numSegments;
@@ -1133,7 +1198,7 @@ export class World {
       }
       p.phase = phase;
 
-      // Sons de transição do ciclo global
+      // Global cycle transition sounds
       if (phase === 'opening') {
         if (!p.rumblePlayed) {
           audio.playQuicksandRumble();
@@ -1149,24 +1214,24 @@ export class World {
 
       let openCount = 0;
       p.segments.forEach((seg, i) => {
-        // Instante em que esta seção deve estar aberta (alvo binário 0/1).
-        // Abertura E fecho em onda da entrada (i=0, +Z, borda do herói) até
-        // a saída (i=n-1, -Z): o fecho varre ~9.1 m/s, na mesma direção e
-        // velocidade do Harry (9.0), para atravessar correndo junto com a onda.
+        // Moment when this section should be open (binary target 0/1).
+        // Opening AND closing as a wave from the entry (i=0, +Z, player's edge) to
+        // the exit (i=n-1, -Z): the closing wave sweeps at ~9.1 m/s, the same
+        // direction and pace as Harry (9.0), so the player can run alongside the wave.
         const openStart = p.closedDur + (i * p.openingDur) / n;
         const closeStart = p.closedDur + p.openingDur + p.openDur + (i * p.closingDur) / n;
         const target = cycleTime >= openStart && cycleTime < closeStart ? 1 : 0;
 
-        // Abertura/fecho suave da seção
+        // Smooth section open/close
         seg.openAmount = THREE.MathUtils.lerp(seg.openAmount ?? 0, target, delta * 10);
         if (Math.abs(seg.openAmount - target) < 0.01) seg.openAmount = target;
         seg.isOpen = seg.openAmount > 0.5;
         if (seg.isOpen) openCount++;
 
-        // Metades partem-se do meio para as laterais (X) e afundam (Y)
+        // Halves split from the centre outward (X) and sink (Y)
         const sep = seg.openAmount * 1.4;
         const sink = seg.openAmount * 1.4;
-        // Tremor de terremoto enquanto a seção está em movimento
+        // Earthquake jitter while the section is in motion
         const moving = Math.abs(target - seg.openAmount) > 0.02 ? 1 : 0;
         const jitter = moving * Math.sin(p.timer * 50 + i * 2.1) * 0.06;
         seg.leftMesh.position.set(seg.baseOffset - sep + jitter, -sink, seg.baseOffset);

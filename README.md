@@ -6,6 +6,16 @@ A **first-person (FPS)** recreation of the timeless Atari 2600 classic **Pitfall
 
 ---
 
+## ⚖️ Legal Notice — Fan Work, Non-Commercial
+
+> **Pitfall!** and all related trademarks, characters, and intellectual property are the exclusive property of **Activision Publishing, Inc.** This project is an **independent fan recreation** created for educational and hobbyist purposes only. It is **not affiliated with, endorsed by, or sponsored by Activision** in any way.
+>
+> - No original Activision assets (graphics, audio, code) were copied or reverse-engineered. All visuals are original voxel art; all audio is synthesized from scratch via the Web Audio API.
+> - This project is **strictly non-commercial**: it is free to play, generates no revenue, and is distributed with no charge.
+> - If you are a rights holder and have concerns about this project, please open a GitHub issue or contact the repository owner directly.
+
+---
+
 ## 🎮 Original Controls & Mechanics
 
 Just like in the original Atari 2600 game:
