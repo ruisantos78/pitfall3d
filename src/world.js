@@ -8,7 +8,8 @@ import {
   createScorpionModel, 
   createCampfireModel, 
   createTreasureModel,
-  createOpeningQuicksandModel
+  createOpeningQuicksandModel,
+  createSnakeModel
 } from './models.js';
 import { createVoxelGeometry, createVoxelMaterial } from './voxel.js';
 import { audio } from './audio.js';
@@ -158,7 +159,7 @@ export class World {
     // Scene 4 (crocodiles): half with a vine, half croc-only (decided by LFSR treePat —
     // deterministic, the map never changes between sessions).
     if (spec.sceneType === 4) {
-      return spec.treePat % 2 === 0 ? 'CROCODILE_VINE' : 'CROCODILE_POND';
+      return spec.treePat % 2 === 1 ? 'CROCODILE_VINE' : 'CROCODILE_POND';
     }
     const base = [
       'HOLE_SINGLE',            // 0: one hole + ladder/wall underground
@@ -305,9 +306,10 @@ export class World {
         this.addStationaryLog(group, index, z - 5);
       } else if (obj === 6) {
         this.addCampfire(group, index, z);
+      } else if (obj === 7) {
+        this.addCampfire(group, index, z);
       }
-      // obj === 7 (snake): omitted — surface only, no scorpion on the surface.
-    };
+    }
 
     switch (type) {
       case 'HOLE_SINGLE':
@@ -360,26 +362,9 @@ export class World {
 
       case 'CROCODILE_VINE': {
         // Original scene 4: croc pond (3 crocs) + vine.
-        // In the original ASM, logs (x=124) and crocs (x=60) run in separate lanes —
-        // never overlapping. In the 1D corridor, static obstacles go to the solid ground
-        // BEFORE the lake (edge +10): nothing stationary inside midZ±10 to avoid blocking
-        // croc-to-croc jumps. The lake is 20m like the vine-only lake (vine is identical in the middle).
         this.addWaterPond(group, index, midZ, 20);
         this.addCrocodileTrio(group, index, midZ);
         this.addVine(group, index, midZ);
-        if (scene !== 5) {
-          // No rolling logs in the croc lake (stationary only): a rolling log
-          // crossing the lake would break the croc-hopping mechanic.
-          if (obj === 4) {
-            this.addStationaryLog(group, index, midZ + 19);
-          } else if (obj === 5) {
-            this.addStationaryLog(group, index, midZ + 19);
-            this.addStationaryLog(group, index, midZ + 24);
-          } else if (obj === 6) {
-            this.addCampfire(group, index, midZ + 19);
-          }
-        }
-        this.addTreasure(group, index, midZ - 20, 'diamond');
         break;
       }
 
@@ -387,18 +372,6 @@ export class World {
         // Croc lake without a vine (croc-only): cross by hopping from croc to croc.
         this.addWaterPond(group, index, midZ, 20);
         this.addCrocodileTrio(group, index, midZ);
-        if (scene !== 5) {
-          // No rolling logs here either (stationary only).
-          if (obj === 4) {
-            this.addStationaryLog(group, index, midZ + 19);
-          } else if (obj === 5) {
-            this.addStationaryLog(group, index, midZ + 19);
-            this.addStationaryLog(group, index, midZ + 24);
-          } else if (obj === 6) {
-            this.addCampfire(group, index, midZ + 19);
-          }
-        }
-        this.addTreasure(group, index, midZ - 20, 'diamond');
         break;
       }
 
@@ -700,10 +673,10 @@ export class World {
     floor.position.set(0, TUNNEL_FLOOR_Y - 0.25, midZ);
     group.add(floor);
 
-    const sideGeo = new THREE.BoxGeometry(0.5, 8, length);
+    const sideGeo = new THREE.BoxGeometry(0.5, 7.5, length);
     for (const x of [-4.75, 4.75]) {
       const wall = new THREE.Mesh(sideGeo, this.tunnelWallMaterial);
-      wall.position.set(x, TUNNEL_FLOOR_Y + 4, midZ);
+      wall.position.set(x, TUNNEL_FLOOR_Y + 3.5, midZ);
       group.add(wall);
     }
 
@@ -866,6 +839,26 @@ export class World {
       vine,
       centerZ,
       time: phaseTime ?? Math.random() * Math.PI,
+    });
+  }
+
+  addSnake(group, screenIndex, z) {
+    const snake = createSnakeModel(0.28);
+    snake.mesh.position.set(0, 0, z);
+    
+    // Slight random rotation for variety
+    snake.mesh.rotation.y = (Math.random() - 0.5) * 0.5;
+
+    group.add(snake.mesh);
+    this.activeHazards.push({
+      type: 'snake',
+      z,
+      minZ: z - 1.5,
+      maxZ: z + 1.5,
+      mesh: snake.mesh,
+      head: snake.head,
+      tongue: snake.tongue,
+      timer: Math.random() * Math.PI * 2, // Desync animations
     });
   }
 
@@ -1200,12 +1193,17 @@ export class World {
 
         // Halves split from the centre outward (X) and sink (Y)
         const sep = seg.openAmount * 1.4;
-        const sink = seg.openAmount * 1.4;
+        const sink = seg.openAmount * 4.0; // Sink much deeper to hide them
         // Earthquake jitter while the section is in motion
         const moving = Math.abs(target - seg.openAmount) > 0.02 ? 1 : 0;
         const jitter = moving * Math.sin(p.timer * 50 + i * 2.1) * 0.06;
         seg.leftMesh.position.set(seg.baseOffset - sep + jitter, -sink, seg.baseOffset);
         seg.rightMesh.position.set(seg.baseOffset + sep + jitter, -sink, seg.baseOffset);
+        
+        // Hide the meshes completely when fully open so they don't show at the bottom
+        const hide = seg.openAmount > 0.95;
+        seg.leftMesh.visible = !hide;
+        seg.rightMesh.visible = !hide;
       });
 
       p.openCount = openCount;

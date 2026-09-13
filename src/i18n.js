@@ -78,6 +78,7 @@ const STRINGS = {
     'death.spikes': 'Espetado nos espinhos do poço!',
     'death.cave': 'Esmagado contra o teto da caverna!',
     'death.scorpion': 'Picado por um escorpião venenoso!',
+    'death.snake': 'Mordido por uma cascavel!',
   },
   en: {
     'hud.score': 'SCORE',
@@ -154,6 +155,7 @@ const STRINGS = {
     'death.spikes': 'Impaled on the pit spikes!',
     'death.cave': 'Smashed onto the cave ceiling!',
     'death.scorpion': 'Stung by a venomous scorpion!',
+    'death.snake': 'Bitten by a rattlesnake!',
   },
 };
 

@@ -5,6 +5,9 @@ import { SCREEN_LENGTH, TUNNEL_FLOOR_Y, CEIL_TOP_Y } from './world.js';
 import { createPlayerArmsModel } from './models.js';
 import { t, getHighScore, getShowHelp, submitScore } from './i18n.js';
 
+// DEBUG GOD MODE: Enables infinite lives and bypasses hazard kill boxes (croc, snake, fire, scorpions, logs).
+export const DEBUG_GOD_MODE = false;
+
 export const GRAVITY = 28.0;
 export const JUMP_VELOCITY = 10.5;
 export const RUN_SPEED = 9.0;
@@ -86,6 +89,12 @@ export class Player {
       } else if (e.code === 'KeyS' || e.code === 'ArrowDown') {
         if (this.touchOnly) return;
         this.moveBackward = true;
+      } else if (e.code === 'KeyA' || e.code === 'ArrowLeft' || e.code === 'KeyD' || e.code === 'ArrowRight') {
+        if (this.touchOnly) return;
+        if (!this.turnJustPressed) {
+          this.targetRotY = this.targetRotY === 0 ? Math.PI : 0;
+          this.turnJustPressed = true;
+        }
       } else if (e.code === 'Space' || e.code === 'Enter') {
         if (!this.actionPressed) {
           this.actionJustPressed = true;
@@ -99,6 +108,8 @@ export class Player {
         this.moveForward = false;
       } else if (e.code === 'KeyS' || e.code === 'ArrowDown') {
         this.moveBackward = false;
+      } else if (e.code === 'KeyA' || e.code === 'ArrowLeft' || e.code === 'KeyD' || e.code === 'ArrowRight') {
+        this.turnJustPressed = false;
       } else if (e.code === 'Space' || e.code === 'Enter') {
         this.actionPressed = false;
       }
@@ -313,10 +324,13 @@ export class Player {
       this.tripStandTimer = 0;
     }
 
-    // Single axis: Forward (-Z) or Backward (+Z)
+    // Movement is relative to camera facing (this.targetRotY)
     let targetVz = 0;
-    if (this.moveForward) targetVz -= RUN_SPEED;
-    if (this.moveBackward) targetVz += RUN_SPEED;
+    // 0 = face -Z (dir = -1), Math.PI = face +Z (dir = 1)
+    const dir = this.targetRotY === Math.PI ? 1 : -1;
+    
+    if (this.moveForward) targetVz += RUN_SPEED * dir;
+    if (this.moveBackward) targetVz -= RUN_SPEED * dir;
 
     // Responsive arcade acceleration
     this.vz = THREE.MathUtils.lerp(this.vz, targetVz, delta * 15);
@@ -525,6 +539,9 @@ export class Player {
               const isOnMouth = z > croc.z + 0.65;
 
               if (croc.isOpen && isOnMouth) {
+                if (DEBUG_GOD_MODE) {
+                  return 0.35; // Act as if mouth is closed, step on it safely
+                }
                 // Stepped directly into the open mouth!
                 audio.playChomp();
                 this.die('death.crocMouth');
@@ -727,6 +744,7 @@ export class Player {
     // 1. Logs (Stationary & Rolling)
     for (const hazard of world.activeHazards) {
       if (hazard.type === 'log' || hazard.type === 'rolling_log') {
+        if (DEBUG_GOD_MODE) continue;
         // Log falling from the sky, in the pit, or waiting its turn (invisible) — no collision
         if (hazard.falling || hazard.fallingIntoPit || hazard.waiting) continue;
         const distZ = Math.abs(this.z - hazard.z);
@@ -749,6 +767,7 @@ export class Player {
           }
         }
       } else if (hazard.type === 'fire') {
+        if (DEBUG_GOD_MODE) continue;
         // Campfire: deadly if walking into it without jumping (same level only)
         const distZ = Math.abs(this.z - hazard.z);
         if (distZ < 1.1 && Math.abs(this.y) < 0.9) {
@@ -757,6 +776,7 @@ export class Player {
           return;
         }
       } else if (hazard.type === 'scorpion') {
+        if (DEBUG_GOD_MODE) continue;
         // Scorpion: deadly if touching without jumping (same level only)
         const distZ = Math.abs(this.z - hazard.z);
         const hy = hazard.baseY ?? 0.08;
@@ -836,7 +856,14 @@ export class Player {
     this.camera.position.set(0, THREE.MathUtils.lerp(this.camera.position.y, targetCameraY, delta * 12), this.z);
     this.camera.rotation.x = THREE.MathUtils.lerp(this.camera.rotation.x, -0.04 + bobPitch, delta * 12);
     this.camera.rotation.z = 0;
-    this.camera.rotation.y = 0; // Strict forward orientation down corridor
+
+    // Ensure targetRotY is initialized
+    if (this.targetRotY === undefined) {
+      this.targetRotY = 0;
+    }
+
+    // Smooth 180 degree spin
+    this.camera.rotation.y = THREE.MathUtils.lerp(this.camera.rotation.y, this.targetRotY, delta * 15);
 
     // Arms animations
     if (this.arms) {
@@ -867,9 +894,16 @@ export class Player {
   die(reasonKey = 'death.lifeLost') {
     if (this.isDying || this.isGameOver) return;
     this.isDying = true;
-    this.deathTimer = 1.2;
+    
+    if (DEBUG_GOD_MODE) {
+      // In God Mode, just respawn quickly without losing lives
+      this.deathTimer = 0.5;
+    } else {
+      this.deathTimer = 1.2;
+      this.lives--;
+    }
+    
     this.deathReasonKey = reasonKey;
-    this.lives--;
 
     // Fade to black on death
     const fade = document.getElementById('death-fade');
@@ -984,6 +1018,8 @@ export class Player {
     // Drop from the sky like the original: spawns high up and gravity does the rest.
     this.y = this.RESPAWN_DROP_HEIGHT;
     this.respawnDrop = true;
+    this.targetRotY = 0;
+    this.camera.rotation.y = 0;
     this.camera.position.set(0, this.y + EYE_HEIGHT, this.z);
   }
 
@@ -1013,6 +1049,8 @@ export class Player {
     this.y = 0;
     this.vy = 0;
     this.vz = 0;
+    this.targetRotY = 0;
+    this.camera.rotation.y = 0;
     this.isGrounded = true;
     this.score = 2000;
     this.lives = 3;

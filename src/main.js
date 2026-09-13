@@ -47,7 +47,7 @@ class Game {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
 
@@ -97,7 +97,9 @@ class Game {
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     };
+
     window.addEventListener('resize', handleResize);
+    
     // On mobile, the browser bar appears/disappears without triggering a classic resize event
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleResize);

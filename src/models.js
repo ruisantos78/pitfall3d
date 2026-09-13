@@ -623,6 +623,234 @@ export function createCampfireModel(voxelSize = 0.22) {
 }
 
 /**
+ * Creates a naturalistic rattlesnake (voxel style) with organic coiled body,
+ * tapered head, distinct rattle, and animated tongue.
+ * - Organic S-curved coils with rounded profiles
+ * - Diamond-patterned back using alternating voxel colors
+ * - Tapered triangular head with yellow eyes and forked tongue
+ * - Segmented rattle at tail
+ * - Separated into body, head, and tongue for animation.
+ */
+export function createSnakeModel(voxelSize = 0.22) {
+  const group = new THREE.Group();
+
+  // Coral snake colors: Red, Black, Yellow/White bands
+  const colRed = '#cc0000';
+  const colBlack = '#111111';
+  const colYellow = '#ffdd00';
+  const colBelly = '#ffdd00';
+  const colRattle = '#885500';
+  const colTongue = '#ff3333';
+  const colEye = '#000000';
+
+  const bodyVoxels = [];
+  const headVoxels = [];
+  const rattleVoxels = [];
+
+  // Band pattern: alternating Red-Black-Yellow-Black along Z axis
+  // Each band is ~1.5 voxels wide
+  const getBandColor = (z) => {
+    const bandWidth = 1.5;
+    const bandIndex = Math.floor((z + 4) / bandWidth) % 4;
+    // 0=Red, 1=Black, 2=Yellow, 3=Black
+    return bandIndex === 0 ? colRed : bandIndex === 2 ? colYellow : colBlack;
+  };
+
+  const getBodyColor = (x, y, z, ring) => {
+    // Main band color based on Z position
+    const baseColor = getBandColor(z);
+    // Belly is always yellow
+    if (y <= -0.5) return colBelly;
+    // Slight variation on top for texture
+    if (y >= 2) {
+      return baseColor === colBlack ? '#222222' : baseColor;
+    }
+    return baseColor;
+  };
+
+  // --- ORGANIC COILED BODY (S-curve, 3 coils) ---
+  // Coil 1: rear (tail end) - larger, at z = -3 to -1
+  const coil1 = [
+    // Base ring (y=0) - roughly oval 7x5
+    ...[...Array(7)].map((_, i) => i - 3).flatMap(x =>
+      [...Array(5)].map((_, j) => j - 2).filter(z => {
+        const dx = x / 3.5, dz = z / 2.5;
+        return (dx * dx + dz * dz > 0.35) && (dx * dx + dz * dz < 1.1);
+      }).map(z => ({ x, y: 0, z: z - 2.5, color: getBodyColor(x, 0, z, 0) }))
+    ),
+    // Mid ring (y=1) - smaller
+    ...[...Array(5)].map((_, i) => i - 2).flatMap(x =>
+      [...Array(3)].map((_, j) => j - 1).filter(z => {
+        const dx = x / 2.5, dz = z / 1.5;
+        return (dx * dx + dz * dz > 0.25) && (dx * dx + dz * dz < 1.0);
+      }).map(z => ({ x, y: 1, z: z - 2.5, color: getBodyColor(x, 1, z, 0) }))
+    ),
+    // Top ring (y=2) - even smaller
+    ...[...Array(3)].map((_, i) => i - 1).flatMap(x =>
+      [...Array(3)].map((_, j) => j - 1).filter(z => {
+        const dx = x / 1.5, dz = z / 1.5;
+        return (dx * dx + dz * dz > 0.15) && (dx * dx + dz * dz < 0.9);
+      }).map(z => ({ x, y: 2, z: z - 2.5, color: getBodyColor(x, 2, z, 0) }))
+    ),
+  ];
+  bodyVoxels.push(...coil1);
+
+  // Coil 2: middle - at z = -0.5 to 1.5
+  const coil2 = [
+    ...[...Array(7)].map((_, i) => i - 3).flatMap(x =>
+      [...Array(5)].map((_, j) => j - 2).filter(z => {
+        const dx = x / 3.5, dz = z / 2.5;
+        return (dx * dx + dz * dz > 0.35) && (dx * dx + dz * dz < 1.1);
+      }).map(z => ({ x, y: 0, z: z + 0.5, color: getBodyColor(x, 0, z, 1) }))
+    ),
+    ...[...Array(5)].map((_, i) => i - 2).flatMap(x =>
+      [...Array(3)].map((_, j) => j - 1).filter(z => {
+        const dx = x / 2.5, dz = z / 1.5;
+        return (dx * dx + dz * dz > 0.25) && (dx * dx + dz * dz < 1.0);
+      }).map(z => ({ x, y: 1, z: z + 0.5, color: getBodyColor(x, 1, z, 1) }))
+    ),
+    ...[...Array(3)].map((_, i) => i - 1).flatMap(x =>
+      [...Array(3)].map((_, j) => j - 1).filter(z => {
+        const dx = x / 1.5, dz = z / 1.5;
+        return (dx * dx + dz * dz > 0.15) && (dx * dx + dz * dz < 0.9);
+      }).map(z => ({ x, y: 2, z: z + 0.5, color: getBodyColor(x, 2, z, 1) }))
+    ),
+  ];
+  bodyVoxels.push(...coil2);
+
+  // Coil 3: front (neck base) - at z = 3 to 5
+  const coil3 = [
+    ...[...Array(5)].map((_, i) => i - 2).flatMap(x =>
+      [...Array(4)].map((_, j) => j - 1.5).filter(z => {
+        const dx = x / 2.5, dz = z / 2.0;
+        return (dx * dx + dz * dz > 0.3) && (dx * dx + dz * dz < 1.0);
+      }).map(z => ({ x, y: 0, z: z + 3.5, color: getBodyColor(x, 0, z, 2) }))
+    ),
+    ...[...Array(4)].map((_, i) => i - 1.5).flatMap(x =>
+      [...Array(2)].map((_, j) => j - 0.5).filter(z => {
+        const dx = x / 2.0, dz = z / 1.0;
+        return (dx * dx + dz * dz > 0.2) && (dx * dx + dz * dz < 0.9);
+      }).map(z => ({ x, y: 1, z: z + 3.5, color: getBodyColor(x, 1, z, 2) }))
+    ),
+    ...[...Array(2)].map((_, i) => i - 0.5).flatMap(x =>
+      [...Array(2)].map((_, j) => j - 0.5).filter(z => {
+        const dx = x / 1.0, dz = z / 1.0;
+        return (dx * dx + dz * dz > 0.1) && (dx * dx + dz * dz < 0.8);
+      }).map(z => ({ x, y: 2, z: z + 3.5, color: getBodyColor(x, 2, z, 2) }))
+    ),
+  ];
+  bodyVoxels.push(...coil3);
+
+  // Belly scales (underside, lighter color)
+  for (let cz = -3; cz <= 5; cz++) {
+    bodyVoxels.push({ x: 0, y: -0.5, z: cz, color: colBelly });
+  }
+
+  // --- RATTLE (segmented, at tail z = -3.5) ---
+  for (let seg = 0; seg < 4; seg++) {
+    const rz = -3.5 - seg * 0.6;
+    const rSize = 2 - seg * 0.4;
+    for (let x = -rSize; x <= rSize; x++) {
+      for (let z = -rSize; z <= rSize; z++) {
+        if (Math.abs(x) === rSize || Math.abs(z) === rSize) {
+          rattleVoxels.push({ x, y: 1, z: rz + z * 0.1, color: colRattle });
+        }
+      }
+    }
+  }
+  // Rattle tip
+  rattleVoxels.push({ x: 0, y: 2, z: -5.5, color: colRattle });
+
+  // --- TAPERED TRIANGULAR HEAD (faces +Z) ---
+  // Head spans from z=5 to z=8, tapering from 3-wide to 1-wide
+  const headBaseY = 3;
+  // Head base (connects to neck)
+  for (let x = -1; x <= 1; x++) {
+    headVoxels.push({ x, y: headBaseY, z: 5, color: getBodyColor(x, headBaseY, 5, 3) });
+  }
+  // Head middle
+  for (let x = -1; x <= 1; x++) {
+    for (let z = 6; z <= 7; z++) {
+      headVoxels.push({ x, y: headBaseY, z, color: getBodyColor(x, headBaseY, z, 3) });
+    }
+  }
+  // Head upper
+  for (let x = -1; x <= 1; x++) {
+    headVoxels.push({ x, y: headBaseY + 1, z: 6, color: getBodyColor(x, headBaseY + 1, 6, 3) });
+  }
+  // Snout (tapered to point at z=8)
+  headVoxels.push({ x: 0, y: headBaseY, z: 8, color: getBodyColor(0, headBaseY, 8, 3) });
+  headVoxels.push({ x: 0, y: headBaseY + 1, z: 7, color: getBodyColor(0, headBaseY + 1, 7, 3) });
+  // Upper jaw
+  for (let x = -1; x <= 1; x++) {
+    headVoxels.push({ x, y: headBaseY + 1, z: 7, color: getBodyColor(x, headBaseY + 1, 7, 3) });
+  }
+
+  // Build meshes
+  const bodyGeo = createVoxelGeometry(bodyVoxels, voxelSize, 'bottom');
+  const bodyMesh = new THREE.Mesh(bodyGeo, SHARED_MATERIAL);
+  group.add(bodyMesh);
+
+  const rattleGeo = createVoxelGeometry(rattleVoxels, voxelSize, 'bottom');
+  const rattleMesh = new THREE.Mesh(rattleGeo, SHARED_MATERIAL);
+  group.add(rattleMesh);
+
+  // --- HEAD GROUP (for animation) ---
+  const headGroup = new THREE.Group();
+  headGroup.position.set(0, (headBaseY + 0.5) * voxelSize, 5.5 * voxelSize);
+
+  const headGeo = createVoxelGeometry(headVoxels, voxelSize, false);
+  const headMesh = new THREE.Mesh(headGeo, SHARED_MATERIAL);
+  headGroup.add(headMesh);
+
+  // Yellow eyes (spherical, on sides of head)
+  const eyeGeo = new THREE.SphereGeometry(voxelSize * 0.35, 8, 8);
+  const eyeMat = new THREE.MeshLambertMaterial({ color: colEye, emissive: colEye, emissiveIntensity: 0.3 });
+  
+  const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+  leftEye.position.set(-voxelSize * 1.2, voxelSize * 0.3, voxelSize * 2.5);
+  headGroup.add(leftEye);
+
+  const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+  rightEye.position.set(voxelSize * 1.2, voxelSize * 0.3, voxelSize * 2.5);
+  headGroup.add(rightEye);
+
+  // --- FORKED TONGUE ---
+  const tongueGroup = new THREE.Group();
+  tongueGroup.position.set(0, -voxelSize * 0.2, voxelSize * 3.5);
+  
+  const tongueGeo = new THREE.BoxGeometry(voxelSize * 0.15, voxelSize * 0.1, voxelSize * 1.8);
+  const tongueMat = new THREE.MeshLambertMaterial({ color: colTongue, transparent: true, opacity: 0.9 });
+  
+  // Left fork
+  const tongueLeft = new THREE.Mesh(tongueGeo, tongueMat);
+  tongueLeft.position.set(-voxelSize * 0.3, 0, voxelSize * 0.9);
+  tongueLeft.rotation.z = 0.25;
+  tongueGroup.add(tongueLeft);
+  
+  // Right fork
+  const tongueRight = new THREE.Mesh(tongueGeo, tongueMat);
+  tongueRight.position.set(voxelSize * 0.3, 0, voxelSize * 0.9);
+  tongueRight.rotation.z = -0.25;
+  tongueGroup.add(tongueRight);
+  
+  // Tongue base
+  const tongueBaseGeo = new THREE.BoxGeometry(voxelSize * 0.5, voxelSize * 0.1, voxelSize * 0.6);
+  const tongueBase = new THREE.Mesh(tongueBaseGeo, tongueMat);
+  tongueBase.position.set(0, 0, -voxelSize * 0.3);
+  tongueGroup.add(tongueBase);
+
+  headGroup.add(tongueGroup);
+  group.add(headGroup);
+
+  return { 
+    mesh: group,
+    head: headGroup,
+    tongue: tongueGroup
+  };
+}
+
+/**
  * Creates Voxel Treasures: Gold Bar, Silver Bar, Diamond Ring, Money Bag
  */
 export function createTreasureModel(type = 'gold', voxelSize = 0.22) {

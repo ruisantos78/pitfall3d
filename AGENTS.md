@@ -212,6 +212,18 @@ make preview      # runs 'npm run preview'
 
 ---
 
+## 🐛 Debugging & God Mode
+
+To help with debugging models and screen generation without constantly dying, the codebase supports a temporary **God Mode**.
+- **Location:** In `src/player.js`, set `export const DEBUG_GOD_MODE = true;`.
+- **Effect:** 
+  - The player becomes immune to surface hazards (crocodiles, snakes, fires, scorpions).
+  - The player will not trip on logs.
+  - The player will still fall into deadly pits (quicksand, water, abyss) but will instantly respawn **without losing a life** and without triggering the Game Over screen.
+- **Rule:** This is intended as a temporary developer toggle. Do NOT delete the original collision logic or kill boxes; simply bypass them using the `DEBUG_GOD_MODE` flag.
+
+---
+
 ## 💡 Important Tips for Future Agents
 
 - **Always verify the build with `npm run build`** after changing JavaScript files.
