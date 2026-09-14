@@ -85,6 +85,13 @@ export class Player {
     this.camera.position.set(0, EYE_HEIGHT, this.z);
     this.camera.lookAt(0, EYE_HEIGHT, -100);
 
+    // Gamepad state (Xbox/Edge): separate flags OR-ed with keyboard/touch
+    // so polling never clears a held keyboard key.
+    this.padForward = false;
+    this.padBackward = false;
+    this.padPrevAction = false;
+    this.padPrevTurn = false;
+
     this.bindInputs();
   }
 
@@ -125,8 +132,34 @@ export class Player {
       }
     });
 
-    // The mouse is not an action button. Jump and vine release use only
-    // Space/Enter or the touch action button.
+    // Mouse click is the jump button when touch controls are hidden
+    // (desktop + Xbox Edge with mouse). Ignored on UI elements and while
+    // any overlay menu is open so menu clicks never trigger a jump.
+    const isUiClick = (target) => {
+      if (!target || !target.closest) return false;
+      if (target.closest('button, a, input, select')) return true;
+      const startOverlay = document.getElementById('start-overlay');
+      if (startOverlay && !startOverlay.classList.contains('hidden')) return true;
+      const overOverlay = document.getElementById('gameover-overlay');
+      if (overOverlay && !overOverlay.classList.contains('hidden')) return true;
+      return false;
+    };
+    window.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (this.isGameOver) return;
+      if (this.touchOnly) return;
+      if (isUiClick(e.target)) return;
+      audio.init();
+      if (!this.actionPressed) {
+        this.actionJustPressed = true;
+      }
+      this.actionPressed = true;
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button !== 0) return;
+      if (this.touchOnly) return;
+      this.actionPressed = false;
+    });
     const btnFwd = document.getElementById('btn-forward');
     const btnBwd = document.getElementById('btn-backward');
     const btnAct = document.getElementById('btn-action');
@@ -204,6 +237,45 @@ export class Player {
     }
   }
 
+  // Polls the first connected gamepad (Xbox controller on Edge):
+  // left stick / D-pad up-down walks, A/B/RT jump, X/LB turn around.
+  // Runs every frame; uses rising edges so held buttons don't repeat.
+  updateGamepadInput() {
+    if (this.isGameOver) return;
+    const pads = navigator.getGamepads ? navigator.getGamepads() : null;
+    if (!pads) return;
+    let gp = null;
+    for (const p of pads) {
+      if (p && p.connected) {
+        gp = p;
+        break;
+      }
+    }
+    if (!gp) {
+      this.padForward = false;
+      this.padBackward = false;
+      this.padPrevAction = false;
+      this.padPrevTurn = false;
+      return;
+    }
+    const pressed = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
+    const axisY = gp.axes.length > 1 ? gp.axes[1] : 0;
+    this.padForward = pressed(12) || axisY < -0.4;
+    this.padBackward = pressed(13) || axisY > 0.4;
+    const actionHeld = pressed(0) || pressed(1) || pressed(7) || pressed(5);
+    if (actionHeld && !this.padPrevAction) {
+      audio.init();
+      this.actionJustPressed = true;
+    }
+    this.padPrevAction = actionHeld;
+    const turnHeld = pressed(2) || pressed(3) || pressed(4) || pressed(14) || pressed(15);
+    if (turnHeld && !this.padPrevTurn) {
+      audio.init();
+      this.targetRotY = this.targetRotY === 0 ? Math.PI : 0;
+    }
+    this.padPrevTurn = turnHeld;
+  }
+
   // Update physics, movement, vine attachment, and collisions
   update(delta, world) {
     if (this.isGameOver) return;
@@ -217,6 +289,7 @@ export class Player {
       }
       return;
     }
+    this.updateGamepadInput();
 
     // Cooldown timers
     if (this.tripCooldown > 0) this.tripCooldown -= delta;
@@ -331,7 +404,7 @@ export class Player {
         return;
       }
 
-      if (!this.moveForward && !this.moveBackward) {
+      if (!this.moveForward && !this.moveBackward && !this.padForward && !this.padBackward) {
         this.tripStandTimer = 0;
         return;
       }
@@ -352,8 +425,8 @@ export class Player {
     // Underground shortcut pace (2x); surface pace otherwise.
     const pace = this.inTunnel ? RUN_SPEED * TUNNEL_SPEED_MULT : RUN_SPEED;
 
-    if (this.moveForward) targetVz += pace * dir;
-    if (this.moveBackward) targetVz -= pace * dir;
+    if (this.moveForward || this.padForward) targetVz += pace * dir;
+    if (this.moveBackward || this.padBackward) targetVz -= pace * dir;
 
     // Responsive arcade acceleration
     this.vz = THREE.MathUtils.lerp(this.vz, targetVz, delta * 15);

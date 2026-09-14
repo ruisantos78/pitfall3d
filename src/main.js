@@ -128,6 +128,9 @@ class Game {
       this.isRunning = true;
       this.lastTime = performance.now();
     };
+    // Exposed for gamepad Start/A handling in the render loop (Xbox/Edge).
+    this.startGameFromMenu = startGame;
+    this.padMenuPrev = false;
 
     if (startBtn) {
       startBtn.addEventListener('click', (e) => {
@@ -282,6 +285,31 @@ class Game {
     this.world.updateVisibleScreens(0);
   }
 
+  // Gamepad Start/A starts or restarts from the menus (Xbox controller on Edge).
+  pollGamepadMenu() {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : null;
+    if (!pads) return;
+    let gp = null;
+    for (const p of pads) {
+      if (p && p.connected) {
+        gp = p;
+        break;
+      }
+    }
+    const held = !!(gp && ((gp.buttons[9] && gp.buttons[9].pressed) || (gp.buttons[0] && gp.buttons[0].pressed)));
+    if (held && !this.padMenuPrev) {
+      if (this.player && this.player.isGameOver) {
+        this.restartGame();
+      } else if (!this.isRunning && this.startGameFromMenu) {
+        // Don't hijack the options view: the user is toggling settings.
+        const menuOptions = document.getElementById('menu-options');
+        const optionsOpen = menuOptions && !menuOptions.classList.contains('hidden');
+        if (!optionsOpen) this.startGameFromMenu();
+      }
+    }
+    this.padMenuPrev = held;
+  }
+
   animate() {
     requestAnimationFrame(this.animate);
 
@@ -290,6 +318,10 @@ class Game {
     this.lastTime = now;
     // Cap delta to prevent physics glitches if tab is switched
     const delta = Math.min(rawDelta, 0.08);
+
+    if (!this.isRunning || (this.player && this.player.isGameOver)) {
+      this.pollGamepadMenu();
+    }
 
     if (this.isRunning) {
       // 1. Update Dynamic World Entities (Vines, Logs, Crocodiles, Campfires)

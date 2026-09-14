@@ -15,6 +15,7 @@ export class HUD {
     this.crtOverlay = document.getElementById('crt-overlay');
     this.btnSound = document.getElementById('btn-sound');
     this.btnCrt = document.getElementById('btn-crt');
+    this.btnFullscreen = document.getElementById('btn-fullscreen');
 
     this.crocPromptEl = document.getElementById('croc-prompt');
     this.crocTextEl = document.getElementById('croc-status-text');
@@ -53,12 +54,43 @@ export class HUD {
         this.refreshOptionsLabels();
       });
     }
+
+    if (this.btnFullscreen) {
+      this.btnFullscreen.addEventListener('click', () => {
+        this.toggleFullscreen();
+      });
+      document.addEventListener('fullscreenchange', () => {
+        this.refreshOptionsLabels();
+      });
+    }
+  }
+
+  isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  // Fullscreen toggle for desktop and Xbox Edge (must run on user gesture).
+  async toggleFullscreen() {
+    try {
+      if (this.isFullscreen()) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      } else {
+        const el = document.documentElement;
+        if (el.requestFullscreen) await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      }
+    } catch {
+      // Fullscreen denied (iframe permissions, Xbox kiosk mode, etc.): stay windowed.
+    }
+    this.refreshOptionsLabels();
   }
 
   // Reapplies toggle labels in the current language (e.g. after switching PT/EN)
   refreshOptionsLabels(player = null) {
     this.setToggleLabel(this.btnSound, audio.enabled ? '🔊' : '🔇', t(audio.enabled ? 'opt.soundOn' : 'opt.soundOff'));
     this.setToggleLabel(this.btnCrt, '📺', t(this.crtEnabled ? 'opt.crtOn' : 'opt.crtOff'));
+    this.setToggleLabel(this.btnFullscreen, '⛶', t(this.isFullscreen() ? 'opt.fullscreenOn' : 'opt.fullscreenOff'));
     if (player && typeof player.refreshTouchLabel === 'function') {
       player.refreshTouchLabel();
     }
