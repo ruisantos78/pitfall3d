@@ -76,7 +76,8 @@ pitfall/
 #### [`src/player.js`](file:///home/ruisantos/Projects/pitfall/src/player.js)
 - **Physics Constants:**
   - `RUN_SPEED = 9.0` (walk speed forward/backward)
-  - `TUNNEL_SPEED_MULT = 2.0` (underground shortcut pace; jumping stays enabled for scorpions)
+  - `TUNNEL_SPEED_MULT = 1.0` (underground shortcut pace when stairs or scorpions are present)
+  - `EMPTY_TUNNEL_SPEED_MULT = 4.0` (safe empty tunnel transit pace)
   - `JUMP_VELOCITY = 10.5`, `GRAVITY = 28.0` (air time ~0.75s, max running jump range = 6.75m)
   - `EYE_HEIGHT = 2.2` (Harry's first-person eye height)
   - **Natural Camera Tilt:** `camera.rotation.x = -0.04 + bobPitch` (~-2.3° tilt subtly facing the path ahead, framing the ground, obstacles and foreground arms).
@@ -87,7 +88,7 @@ pitfall/
   - `getCrocodileAt(world, z)`: Locates the specific crocodile under the player's feet within the extended range `[-1.2, +2.8]`.
   - `getLadderShaftAt(world, z, margin)`: Finds the ladder shaft containing `z`.
   - Climbing state machine (`climbing: null|'down'|'up'`, `CLIMB_SPEED = 7.0`, 1s `climbGrace`): skips vine grabs and collisions while on the ladder.
-  - `getSurfaceElevation(world, z)`: Returns ground elevation (`0.0`), crocodile top (`0.35`) or abyss (`-10.0`).
+  - `getSurfaceElevation(world, z)`: Returns ground elevation (`0.0`), crocodile top (`0.35`), shallow pit floor (`PIT_FLOOR_Y = -1.0`) or tunnel floor (`TUNNEL_FLOOR_Y`).
   - `checkVineGrab(world)`: Detects proximity to the vine tip and anchors the player.
   - `releaseVine()`: Releases the vine with parabolic momentum. The released vine is stored in `ignoredVine` and skipped by `checkVineGrab` until landing or grabbing another vine (never re-grabs the SAME vine mid-flight; enables vine-to-vine transfers).
   - `tryVineTransfer(world)`: On jump press while swinging, if another vine tip is within (`3.5`, `3.0`), hops straight onto it (press-to-transfer); otherwise falls back to `releaseVine()` flight.
@@ -110,7 +111,7 @@ pitfall/
   - Authentic brick dead-ends (`pitfall.asm` `ContRandom`, see `assets/pitfall.asm`): on ladder screens (scene `0`/`1`) bit 7 of the seed places a `DARK_RED` brick wall in the tunnel at x=`17`/160 (left, near the start edge) or `136`/160 (right) — solid 1m plane, blocks both directions, forcing Harry back to the surface. Other screens get the scorpion instead (never both, like the original).
   - Cave ceiling (`addCaveCeiling`): dark slab at `y=-3` hiding the surface world from below, with holes ONLY over ladder shafts (light + passage); solid everywhere else.
   - Ladder shafts (`addLadderShaft`, NO surrounding walls, just the wooden ladder — ladder ONLY in the middle hole, like the original; side holes drop straight in). The ladder is a movable `Group`: north wall going forward (`-Z`), south wall coming back (`+Z`, repositioned every frame from the camera facing). Walking in (grounded) auto-grabs and climbs down at 7 m/s; jumping over avoids it; shafts never kill. `SPACE` under a shaft climbs back up (1s anti-regrab grace).
-  - Surface pits are shallow (2.5m) on purpose so they never invade the corridor below.
+  - Surface pits have their own shallow bottom at `PIT_FLOOR_Y = -1.0`, independent of the tunnel ceiling. Water, tar and quicksand use the same 20m physical span as their visual openings and remain hit-kill on reaching the bottom.
   - Scorpion in ladder-free tunnels only (`addScorpion` at tunnel `midZ`, slow patrol `~2.2 m/s`, same-level kill) — ladder screens stay scorpion-free so every landing is safe.
 - **Classic Screen Sequence (all LFSR-driven, no invented loop):**
   - `HOLE_SINGLE` / `HOLE_TRIPLE` (ladder shafts + tunnel, see above)
@@ -128,7 +129,7 @@ pitfall/
 
 #### [`src/models.js`](file:///home/ruisantos/Projects/pitfall/src/models.js)
 - `createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12)`:
-  - Fixed pit walls at `Y = -2..0`; bottom is the endless black shaft (`addBottomlessShaft`).
+  - Fixed pit walls and a shallow surface bottom; the quicksand pit never relies on the underground ceiling as its floor.
   - Lid split into 12 sections along `Z`: each section splits in half (halves slide from center to the sides on `X`) and sinks on `Y` as `openAmount` goes 0→1, with tremor while moving. Physics (`isQuicksandOpenAt`) and cycle are per-section.
 - `createCrocodileModel(voxelSize = 0.22)`:
   - Head/eyes at `Z = 0`.
@@ -222,7 +223,7 @@ make preview      # runs 'npm run preview'
 ## 🐛 Debugging & God Mode
 
 To help with debugging models and screen generation without constantly dying, the codebase supports a temporary **God Mode**.
-- **Location:** In `src/main.js`, set `export const DEBUG_GOD_MODE = true;`.
+- **Location:** In `src/debug.js`, set `export const DEBUG_GOD_MODE = true;`. `src/main.js` re-exports the setting for developer tooling.
 - **Effect:** 
   - The player becomes immune to surface hazards (crocodiles, snakes, fires, scorpions).
   - The player will not trip on logs.

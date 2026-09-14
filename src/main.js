@@ -6,9 +6,8 @@ import { World, SCREEN_LENGTH } from './world.js';
 import { Player } from './player.js';
 import { HUD } from './hud.js';
 import { t, getLanguage, setLanguage, getShowHelp, setShowHelp, getHighScore, applyStaticTexts } from './i18n.js';
-
-// DEBUG GOD MODE: Enables infinite lives and bypasses hazard kill boxes (croc, snake, fire, scorpions, logs).
-export const DEBUG_GOD_MODE = true;
+// Re-export the shared debug switch for existing developer tooling.
+export { DEBUG_GOD_MODE } from './debug.js';
 
 class Game {
   constructor() {

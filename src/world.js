@@ -16,11 +16,14 @@ import {
 } from './models/index.js';
 import { createVoxelGeometry, createVoxelMaterial } from './voxel.js';
 import { audio } from './audio.js';
+import { SURFACE_MAPS } from './maps/surface.js';
+import { UNDERGROUND_SHORTCUTS } from './maps/shortcuts.js';
 
 export const SCREEN_LENGTH = 60; // Length of each screen along Z axis
 export const PATH_WIDTH = 8;     // Width of corridor
 export const TUNNEL_FLOOR_Y = -12; // Underground tunnel floor (ladder screens)
 export const CEIL_TOP_Y = -7; // Cave ceiling top (landing on it is hit kill)
+export const PIT_FLOOR_Y = -1.0; // Shallow surface-pit floor, independent from the tunnel
 
 export class World {
   constructor(scene) {
@@ -38,7 +41,19 @@ export class World {
     this.torchTime = 0;
     this.activeOpeningPits = [];
     this.activeTunnelWalls = []; // brick dead-ends (authentic bit-7 wall logic)
+    this.tunnelCorridor = null;         // { entryScreen, exitScreen, entryZ, exitZ, wallNearZ, wallFarZ }
+    this.tunnelCorridorWalls = [];      // dynamic wall meshes added directly to scene
+    this.tunnelCorridorScorpion = null; // legacy single scorpion (now unused)
+    this.tunnelCorridorScorpionEmitter = null;
+    this.tunnelCorridorScorpions = []; // array of { mesh, emitter }
+    // Ceiling plugs: each ladder shaft builds a solid mesh that seals its
+    // opening in the cave ceiling. Default = visible (always sealed).
+    // activateTunnelCorridor hides the two plugs at entry/exit; deactivate restores them.
+    this.openPlugs = [];          // plug meshes currently hidden (corridor entry + exit)
+    this.openShaftScreens = null; // Set<screenIndex> whose ladder plugs are open
+    this.visibleLadderScreens = new Set(); // current screen + active corridor exit
     this.collectedTreasureSlots = new Set(); // authentic treasureBits: once per run
+
 
     // Fixed pool of PointLights (constant count => shaders compile once and
     // never again on screen crossings). Per-frame the nearest light emitters
@@ -54,6 +69,12 @@ export class World {
     // { screenIndex, color, distance, intensity, getPos(Vector3)->Vector3 }
     this.lightEmitters = [];
     this._poolVec = new THREE.Vector3();
+
+    // Every ladder phase has a deterministic underground shortcut. Build this
+    // once from the authentic LFSR table so descending a ladder never has to
+    // search for the next ladder or reinterpret the wall bit at runtime.
+    this.shortcutMap = new Map();
+    this._buildShortcutMap();
 
     // Shared world-structure geometry/material cache: boxes reused on every
     // screen (borders, flags, tunnel walls, ladder rungs, spikes, pond water)
@@ -234,14 +255,16 @@ export class World {
     // 2. Boundary flags at the start and end of the screen (visuals + checkpoints)
     this.addBoundaryFlags(group, startZ, endZ);
 
-    // 2b. Section of the continuous tunnel on EVERY screen (endless underground)
+    // Underground base: keep only the permanent lights and torches.
     this.addTunnel(group, index, startZ, endZ);
-    // 2c. Scorpion ONLY in tunnels without ladders (away from landings)
-    if (screenType !== 'HOLE_SINGLE' && screenType !== 'HOLE_TRIPLE') {
-      this.addScorpion(group, index, midZ, TUNNEL_FLOOR_Y + 0.08, 3);
-    }
-    // 2c. Cave ceiling (solid here; shaft screens will cut holes in it)
-    if (screenType !== 'HOLE_SINGLE' && screenType !== 'HOLE_TRIPLE') {
+    // Keep every tunnel ceiling closed except for shaft openings on the active
+    // ladder screens. The first screen is no longer a special case.
+    if (screenType === 'HOLE_SINGLE') {
+      this.addCaveCeiling(group, startZ, endZ, [{ centerZ: midZ, half: 2 }]);
+    } else if (screenType === 'HOLE_TRIPLE') {
+      this.addCaveCeiling(group, startZ, endZ, [12, 0, -12]
+        .map((offset) => ({ centerZ: midZ + offset, half: 1.5 })));
+    } else {
       this.addCaveCeiling(group, startZ, endZ);
     }
 
@@ -292,6 +315,86 @@ export class World {
     return table;
   })();
 
+  // Pre-computed tunnel corridor routes: for each of the 255 screens, the
+  // nearest ladder screen (HOLE_SINGLE or HOLE_TRIPLE) going forward (+fwd)
+  // and backward (+bwd), searching up to 6 hops in each direction. Computed
+  // once at module load — O(1) lookup at descent time, zero LFSR stepping.
+  static TUNNEL_ROUTE_TABLE = (() => {
+    const isLadder = (i) => {
+      const sc = World.LFSR_TABLE[((i % 255) + 255) % 255].sceneType;
+      return sc === 0 || sc === 1; // HOLE_SINGLE or HOLE_TRIPLE
+    };
+    const findNext = (start, step) => {
+      for (let k = 1; k <= 6; k++) {
+        const idx = start + step * k;
+        if (isLadder(idx)) return ((idx % 255) + 255) % 255;
+      }
+      // Fallback: 3 screens away (original Atari convention)
+      return ((( start + step * 3) % 255) + 255) % 255;
+    };
+    return Array.from({ length: 255 }, (_, i) => ({
+      fwd: findNext(i, 1),  // next ladder going forward  (-Z direction)
+      bwd: findNext(i, -1), // next ladder going backward (+Z direction)
+    }));
+  })();
+
+  getSurfaceMap(index) {
+    const phase = ((index % 255) + 255) % 255;
+    return SURFACE_MAPS[String(phase + 1).padStart(3, '0')];
+  }
+
+  getShortcutExit(index) {
+    const phase = ((index % 255) + 255) % 255;
+    return UNDERGROUND_SHORTCUTS[String(phase + 1).padStart(3, '0')];
+  }
+
+  getWallZ(screenIndex, wall) {
+    const startZ = -screenIndex * SCREEN_LENGTH;
+    return wall === 'N' ? startZ - SCREEN_LENGTH : startZ;
+  }
+
+  // Returns the direction occupied by the authentic brick wall on a ladder
+  // screen: -1 is the forward (-Z) side and +1 is the backward (+Z) side.
+  // The bit is encoded by the original ContRandom routine, where bit 7 set
+  // places the wall near the forward edge of the screen.
+  static getEntryWallSide(screenIdx) {
+    const entry = World.LFSR_TABLE[((screenIdx % 255) + 255) % 255];
+    const wallSide = (entry.rand >>> 7) & 1;
+    return wallSide === 1 ? -1 : +1;
+  }
+
+  // Cache the fixed shortcut map. The surface table supplies the wall side,
+  // and the fixed shortcut table supplies the exit phase. No LFSR stepping is
+  // needed when a corridor is activated.
+  _buildShortcutMap() {
+    for (let i = 0; i < 255; i++) {
+      const map = this.getSurfaceMap(i);
+      if (!map || map.Hole <= 0) continue;
+
+      const exitPhase = this.getShortcutExit(i);
+      if (!exitPhase) continue;
+      const exitScreen = exitPhase - 1;
+      const direction = map.Wall === 'N' ? 1 : -1;
+      const roomCount = direction > 0
+        ? (i - exitScreen + 255) % 255
+        : (exitScreen - i + 255) % 255;
+      const screenDelta = direction > 0 ? -roomCount : roomCount;
+      const entryZ = -i * SCREEN_LENGTH - SCREEN_LENGTH / 2;
+      const exitZ = -exitScreen * SCREEN_LENGTH - SCREEN_LENGTH / 2;
+
+      this.shortcutMap.set(i, {
+        entryScreen: i,
+        exitScreen,
+        screenDelta,
+        direction,
+        entryWall: map.Wall,
+        exitWall: this.getSurfaceMap(exitScreen).Wall,
+        entryZ,
+        exitZ,
+      });
+    }
+  }
+
   getAuthenticSpec(index) {
     return World.LFSR_TABLE[((index % 255) + 255) % 255];
   }
@@ -313,27 +416,17 @@ export class World {
 
   // Deterministic Pitfall 2600 screen sequence (hybrid authentic+)
   getScreenType(index) {
-    const spec = this.getAuthenticSpec(index);
-    // Scene 4 (crocodiles): decided by bits 0-2 (objectType).
-    // If bits 0-2 are 010(2), 011(3), 110(6), or 111(7), there is a vine.
-    // This is equivalent to checking if bit 1 (value 2) is set.
-    if (spec.sceneType === 4) {
-      return (spec.objectType & 2) !== 0 ? 'CROCODILE_VINE' : 'CROCODILE_POND';
+    const map = this.getSurfaceMap(index);
+    if (map.Hole === 1) return 'HOLE_SINGLE';
+    if (map.Hole === 3) return 'HOLE_TRIPLE';
+    if (map.Pit === 'Tar') return 'TAR_PIT_VINE';
+    if (map.Pit === 'Crocodile') return map.Vine ? 'CROCODILE_VINE' : 'CROCODILE_POND';
+    if (map.Pit === 'Quicksand') {
+      if (map.Treasure) return 'DISAPPEARING_QUICKSAND';
+      if (map.Shifting) return map.Vine ? 'QUICKSAND_VINE_OPEN' : 'BLUE_QUICKSAND';
+      return 'QUICKSAND_VINE';
     }
-    const base = [
-      'HOLE_SINGLE',            // 0: one hole + ladder/wall underground
-      'HOLE_TRIPLE',            // 1: three holes
-      'TAR_PIT_VINE',           // 2: black pit + vine
-      'QUICKSAND_VINE',         // 3: blue swamp + vine
-      'CROCODILE_VINE',         // 4: (handled above)
-      'DISAPPEARING_QUICKSAND', // 5: black quicksand + treasure
-      'QUICKSAND_VINE_OPEN',    // 6: black quicksand + vine
-      'BLUE_QUICKSAND',         // 7: blue quicksand (no vine)
-    ][spec.sceneType];
-    // Hybrid+: keep current rolling-log/vine-variety extras alive by
-    // re-injecting them when the authentic cell would otherwise be bare
-    // (bare rolling-log cells already cover ROLLING_LOGS/TRIPLE_LOGS).
-    return base;
+    return 'LOGS';
   }
 
   buildGroundAndBorders(group, index, startZ, endZ, screenType) {
@@ -392,9 +485,9 @@ export class World {
       const isOverHazard = hasCentralHazard && (worldZ <= hazardStartZ && worldZ >= hazardEndZ);
       const isOverDisappearingPit = hasDisappearingPit && Math.abs(worldZ - pitCenterZ) <= 10.2;
       // Underground shafts (ladder): 1 of 4m or 3 of 3m
-      const isOverShaft = (screenType === 'HOLE_SINGLE' && Math.abs(worldZ - midZ) <= 2.2) ||
+    const isOverShaft = (screenType === 'HOLE_SINGLE' && Math.abs(worldZ - midZ) <= 2.0) ||
         (screenType === 'HOLE_TRIPLE' &&
-          (Math.abs(worldZ - (midZ + 12)) <= 1.7 || Math.abs(worldZ - midZ) <= 1.7 || Math.abs(worldZ - (midZ - 12)) <= 1.7));
+          (Math.abs(worldZ - (midZ + 12)) <= 1.5 || Math.abs(worldZ - midZ) <= 1.5 || Math.abs(worldZ - (midZ - 12)) <= 1.5));
       // Log exit row: 1 full-width row (including the green edges)
       const isOverLogExit = hasLogExitPit && Math.abs(worldZ - logExitPitCenterZ) <= 0.8;
       if (isOverLogExit) continue;
@@ -449,12 +542,6 @@ export class World {
     // sprite — money bag, silver bar, gold bar, diamond ring — worth exactly
     // 2000/3000/4000/5000 BCD points (matches models.js `points`).
     const treasureKinds = ['money', 'silver', 'gold', 'diamond'];
-    // Authentic brick dead-end (pitfall.asm ContRandom): on ladder scenes
-    // (0/1) bit 7 picks the wall side — 17/160 (left) or 136/160 (right).
-    // Screen-left is behind us (+Z), so LEFT lands near the start edge.
-    const wallFrac = ((spec.rand ?? 0) >> 7) & 1 ? 136 / 160 : 17 / 160;
-    const tunnelWallZ = startZ - SCREEN_LENGTH * wallFrac;
-
     // Overlay ground object — surface map only (pitfall.asm bits 0..2).
     // Underground (tunnel + scorpion) for scenes 0-1 is built separately.
     // obj 7 = cobra (surface snake), spawned by addOverlayObject below.
@@ -487,9 +574,6 @@ export class World {
         // Original: hole with ladder to the underground. Walk in to descend,
         // jump over to stay on the surface.
         this.addLadderShaft(group, index, midZ, 2);
-        this.addCaveCeiling(group, startZ, endZ, [{ centerZ: midZ, half: 2 }]);
-        // Authentic brick dead-end in the tunnel below (bit-7 side).
-        this.addTunnelWall(group, index, tunnelWallZ);
         addOverlayObject(objZ);
         break;
 
@@ -498,9 +582,6 @@ export class World {
         this.addLadderShaft(group, index, midZ + 12, 1.5, false);
         this.addLadderShaft(group, index, midZ, 1.5, true);
         this.addLadderShaft(group, index, midZ - 12, 1.5, false);
-        this.addCaveCeiling(group, startZ, endZ, [12, 0, -12].map((off) => ({ centerZ: midZ + off, half: 1.5 })));
-        // Authentic brick dead-end in the tunnel below (bit-7 side).
-        this.addTunnelWall(group, index, tunnelWallZ);
         addOverlayObject(objZ);
         break;
 
@@ -819,6 +900,140 @@ export class World {
     this.activeTunnelWalls.push({ screenIndex, z: wallZ });
   }
 
+  // Called when Harry starts climbing down a ladder. The pre-computed map
+  // determines the only valid travel direction: away from the authentic wall
+  // on the entry screen. Dynamic objects use screenIndex = -1 so that
+  // removeScreenEntities() never touches them.
+  activateTunnelCorridor(entryScreenIndex) {
+    // Clean up any previous corridor (safety guard against double-activation)
+    this.deactivateTunnelCorridor();
+
+    const phase = ((entryScreenIndex % 255) + 255) % 255;
+    const shortcut = this.shortcutMap.get(phase);
+    if (!shortcut) return;
+    const { screenDelta, direction, entryWall, exitWall } = shortcut;
+
+    // World-space Z for the centre of each screen's ladder shaft (midZ)
+    const entryZ = -(entryScreenIndex * SCREEN_LENGTH) - SCREEN_LENGTH / 2;
+    // The signed room count keeps the exit correct across the 255-screen
+    // wraparound without stepping the LFSR or searching for another ladder.
+    const exitScreenIndex = entryScreenIndex + screenDelta;
+    const exitZ = -(exitScreenIndex * SCREEN_LENGTH) - SCREEN_LENGTH / 2;
+
+    // Each endpoint uses the wall position declared by its surface map.
+    const nearWallZ = this.getWallZ(entryScreenIndex, entryWall);
+    const farWallZ = this.getWallZ(exitScreenIndex, exitWall);
+
+    // Build and add both walls directly to the scene (not to a screen group)
+    const buildDynWall = (z) => {
+      const wall = createBrickWallModel(0.25, 0.25);
+      wall.position.set(-4.5, TUNNEL_FLOOR_Y, z - 0.5);
+      this.scene.add(wall);
+      // Register in activeTunnelWalls so player collision code picks it up
+      this.activeTunnelWalls.push({ screenIndex: -1, z, mesh: wall });
+      return wall;
+    };
+    const w1 = buildDynWall(nearWallZ);
+    const w2 = buildDynWall(farWallZ);
+    this.tunnelCorridorWalls = [w1, w2];
+
+    // Spawn scorpions every 3 screens inside the corridor (excluding endpoints).
+    const totalScreens = Math.abs(screenDelta);
+    const scorpionInfos = [];
+    for (let i = 3; i < totalScreens; i += 3) {
+      const scZ = entryZ + direction * (i * SCREEN_LENGTH);
+      const patrolRange = SCREEN_LENGTH * 0.25; // patrol 25% of a screen length
+      this.addScorpion(this.scene, -1, scZ, TUNNEL_FLOOR_Y + 0.08, patrolRange);
+      const sc = this.activeHazards[this.activeHazards.length - 1];
+      const emitter = this.lightEmitters[this.lightEmitters.length - 1];
+      scorpionInfos.push({ mesh: sc.mesh, emitter });
+    }
+    this.tunnelCorridorScorpions = scorpionInfos;
+
+    this.tunnelCorridor = {
+      entryScreenIndex,
+      exitScreenIndex,
+      screenDelta,
+      entryZ,
+      exitZ,
+      direction,
+    };
+
+    // Mark which screens have their ladder ceiling open, so screens that build
+    // later (e.g. the exit screen loading mid-descent) start their plug hidden.
+    this.openShaftScreens = new Set([entryScreenIndex, exitScreenIndex]);
+    // Hide plugs for already-loaded entry and exit screens
+    for (const si of [entryScreenIndex, exitScreenIndex]) {
+      for (const h of this.activeHazards) {
+        if (h.type === 'ladder_shaft' && h.hasLadder && h.screenIndex === si && h.ceilingPlug) {
+          h.ceilingPlug.visible = false;
+          if (h.ladder) h.ladder.visible = true;
+          if (!this.openPlugs.includes(h.ceilingPlug)) this.openPlugs.push(h.ceilingPlug);
+        }
+      }
+    }
+    for (const h of this.activeHazards) {
+      if (h.type === 'ladder_shaft' && h.ladder && !this.openShaftScreens.has(h.screenIndex)) {
+        h.ladder.visible = false;
+      }
+    }
+  }
+
+  // Called when Harry climbs back up to the surface. Removes the two dynamic
+  // corridor walls and the corridor scorpion from the scene.
+  deactivateTunnelCorridor() {
+    if (!this.tunnelCorridor) return;
+
+    // Remove dynamic walls from scene and activeTunnelWalls list
+    for (const wall of this.tunnelCorridorWalls) {
+      this.scene.remove(wall);
+      // Dispose geometry (not shared — built per-descent)
+      wall.traverse((o) => {
+        if (o.isMesh) {
+          if (o.geometry && !this.sharedGeometries.has(o.geometry) && !isSharedModelGeometry(o.geometry))
+            o.geometry.dispose();
+          const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+          for (const m of mats)
+            if (!this.sharedMaterials.has(m) && !isSharedModelMaterial(m)) m.dispose();
+        }
+      });
+    }
+    this.activeTunnelWalls = this.activeTunnelWalls.filter(w => w.screenIndex !== -1);
+    this.tunnelCorridorWalls = [];
+
+    // Remove corridor scorpions (any number) from both the scene and the
+    // collision list. Keeping stale hazards here caused old scorpions to
+    // survive every corridor transition.
+    const corridorScorpionMeshes = new Set(
+      this.tunnelCorridorScorpions.map(sc => sc.mesh)
+    );
+    for (const sc of this.tunnelCorridorScorpions) {
+      if (sc.mesh) this.scene.remove(sc.mesh);
+    }
+    this.activeHazards = this.activeHazards.filter(
+      hazard => !corridorScorpionMeshes.has(hazard.mesh)
+    );
+    // Remove associated emitters
+    this.lightEmitters = this.lightEmitters.filter(e =>
+      !this.tunnelCorridorScorpions.some(sc => sc.emitter === e)
+    );
+    this.tunnelCorridorScorpions = [];
+    // Legacy fields cleared (no longer used)
+    this.tunnelCorridorScorpion = null;
+    this.tunnelCorridorScorpionEmitter = null;
+
+
+    // Restore all ceiling plugs to visible (seal the cave ceiling everywhere again)
+    for (const plug of this.openPlugs) plug.visible = true;
+    this.openPlugs = [];
+    this.openShaftScreens = null;
+    for (const h of this.activeHazards) {
+      if (h.type === 'ladder_shaft' && h.ladder) h.ladder.visible = false;
+    }
+
+    this.tunnelCorridor = null;
+  }
+
   // Underground pit (HOLE_* screens): dirt walls from level 0 down to the tunnel.
   // As in the original, NOT every pit has a ladder: only the middle one has wooden
   // rungs (up and down); the side ones drop straight in.
@@ -849,6 +1064,7 @@ export class World {
       const railGeo = this.sharedGeo('ladderRail', () => new THREE.BoxGeometry(0.12, 9.5, 0.12));
       const rungGeo = this.sharedGeo('ladderRung', () => new THREE.BoxGeometry(1.0, 0.09, 0.09));
       ladder = new THREE.Group();
+      ladder.visible = this.openShaftScreens?.has(screenIndex) === true;
       ladder.position.set(0, 0, centerZ - half + 0.45); // north wall by default
       for (const x of [-0.5, 0.5]) {
         const rail = new THREE.Mesh(railGeo, this.ladderMaterial);
@@ -863,7 +1079,7 @@ export class World {
       group.add(ladder);
     }
 
-    this.activeHazards.push({
+    const hazard = {
       type: 'ladder_shaft',
       screenIndex,
       minZ: centerZ - half,
@@ -872,7 +1088,29 @@ export class World {
       half,
       hasLadder,
       ladder, // null on ladder-free side shafts
-    });
+      ceilingPlug: null, // set below
+    };
+    this.activeHazards.push(hazard);
+
+    // Ceiling plug: a solid slab that seals this shaft's opening in the cave
+    // ceiling. Visible by default — the ceiling is always sealed everywhere
+    // except at the active corridor entry and exit (hidden by activateTunnelCorridor).
+    // Only ladder shafts participate in the corridor, so only they need plugs.
+    if (hasLadder) {
+      const plugLen = half * 2 + 1;
+      const plug = new THREE.Mesh(
+        this.sharedGeo(`ceilPlug:${half}`, () => new THREE.BoxGeometry(PATH_WIDTH + 1, 0.5, plugLen)),
+        this.caveCeilMaterial
+      );
+      plug.position.set(0, CEIL_TOP_Y - 0.25, centerZ);
+      // If this screen is already the active corridor entry/exit when it
+      // builds (e.g. exit screen loaded mid-descent), start the plug hidden.
+      const startOpen = this.openShaftScreens?.has(screenIndex);
+      plug.visible = !startOpen;
+      if (startOpen) this.openPlugs.push(plug);
+      group.add(plug);
+      hazard.ceilingPlug = plug;
+    }
   }
 
   // Continuous underground tunnel running through the entire game: every screen
@@ -989,12 +1227,13 @@ export class World {
     const pitMesh = new THREE.Mesh(pitGeo, this.pitMaterial);
     pitMesh.position.set(0, -0.6, centerZ);
     group.add(pitMesh);
+    this.addShallowPitBottom(group, centerZ, length);
 
     this.activeHazards.push({
       type: 'tarpit',
       screenIndex,
-      minZ: centerZ - length / 2 + 1,
-      maxZ: centerZ + length / 2 - 1,
+      minZ: centerZ - length / 2,
+      maxZ: centerZ + length / 2,
       centerZ,
     });
   }
@@ -1003,6 +1242,10 @@ export class World {
     const pit = createOpeningQuicksandModel(0.45, 12);
     pit.group.position.set(0, -0.45, z);
     group.add(pit.group);
+
+    // The quicksand opening has its own shallow bottom. It must not expose or
+    // rely on the continuous underground ceiling/tunnel geometry below it.
+    this.addShallowPitBottom(group, z, 20);
     const pitData = {
       type: 'disappearing_quicksand',
       screenIndex,
@@ -1054,13 +1297,25 @@ export class World {
     const waterMesh = new THREE.Mesh(waterGeo, this.waterMaterial);
     waterMesh.position.set(0, -0.6, centerZ);
     group.add(waterMesh);
+    this.addShallowPitBottom(group, centerZ, length);
     this.activeHazards.push({
       type: 'water',
       screenIndex,
-      minZ: centerZ - length / 2 + 1,
-      maxZ: centerZ + length / 2 - 1,
+      minZ: centerZ - length / 2,
+      maxZ: centerZ + length / 2,
       centerZ,
     });
+  }
+
+  // Every surface pit has a shallow physical bottom, separate from the tunnel.
+  addShallowPitBottom(group, centerZ, length) {
+    const bottomGeo = this.sharedGeo('surfacePitBottom', () =>
+      new THREE.BoxGeometry(PATH_WIDTH, 0.2, 20)
+    );
+    const bottom = new THREE.Mesh(bottomGeo, this.pitMaterial);
+    bottom.scale.z = length / 20;
+    bottom.position.set(0, PIT_FLOOR_Y - 0.1, centerZ);
+    group.add(bottom);
   }
 
   addCrocodileTrio(group, screenIndex, centerZ) {
@@ -1209,6 +1464,15 @@ export class World {
 
   // Update dynamic elements (animations, rolling logs, vine pendulum)
   update(delta, playerZ = 0, inTunnel = false, climbing = null, northFacing = true, playerVz = 0) {
+    // Keep the visual map focused: only the current screen's ladder and the
+    // active corridor's exit ladder are rendered. Loaded neighboring screens
+    // may still contain their ladder meshes, but they remain hidden.
+    const currentScreen = Math.floor(-playerZ / SCREEN_LENGTH);
+    this.visibleLadderScreens = new Set([currentScreen]);
+    if (this.tunnelCorridor) {
+      this.visibleLadderScreens.add(this.tunnelCorridor.exitScreenIndex);
+    }
+
     // 1b. Ladder side follows the travel direction: north wall (-Z) going
     // forward, south wall (+Z) coming back — the player faces the rungs
     // while climbing either way.
@@ -1216,6 +1480,7 @@ export class World {
     for (const h of this.activeHazards) {
       if (h.type === 'ladder_shaft' && h.ladder) {
         h.ladder.position.z = h.centerZ + ladderSide * (h.half - 0.45);
+        h.ladder.visible = this.openShaftScreens?.has(h.screenIndex) === true;
       }
     }
 

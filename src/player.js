@@ -1,18 +1,21 @@
 // Player Controller - 1st Person Perspective (FPS) for Atari Pitfall 3D
 import * as THREE from 'three';
 import { audio } from './audio.js';
-import { SCREEN_LENGTH, TUNNEL_FLOOR_Y, CEIL_TOP_Y } from './world.js';
+import { SCREEN_LENGTH, TUNNEL_FLOOR_Y, CEIL_TOP_Y, PIT_FLOOR_Y } from './world.js';
 import { createPlayerArmsModel } from './models/index.js';
 import { t, getHighScore, getShowHelp, submitScore } from './i18n.js';
-import { DEBUG_GOD_MODE } from './main.js';
+import { DEBUG_GOD_MODE } from './debug.js';
 
 export const GRAVITY = 28.0;
 export const JUMP_VELOCITY = 10.5;
 export const RUN_SPEED = 9.0;
 export const EYE_HEIGHT = 2.2;
-// Underground shortcut pace: Harry runs 1.5x faster in the tunnel (jumping
+// Underground shortcut pace: Harry runs 2x faster in hazardous tunnel screens (jumping
 // stays enabled — it is the only way past scorpions).
-export const TUNNEL_SPEED_MULT = 2.0;
+export const TUNNEL_SPEED_MULT = 1.0;
+// Empty underground screens have no ladder or scorpion to negotiate, so Harry
+// can sprint through them at the faster transit pace.
+export const EMPTY_TUNNEL_SPEED_MULT = 4.0;
 // Grace period after releasing a vine during which an open crocodile mouth
 // cannot kill (enough time to clear the last croc and land back on track).
 export const CROC_BITE_GRACE_DURATION = 1.0;
@@ -65,6 +68,10 @@ export class Player {
     this.climbZ = 0;
     this.climbGrace = 0; // time without climbing back down right after climbing up
     this.CLIMB_SPEED = 7.0; // fast ladder climb down/up (~1.1s in the 8m pit)
+    // Last surface ladder screen visited: tunnel corridor is pre-configured as
+    // soon as Harry walks into a HOLE_* screen, not only at descent time.
+    this.lastSurfaceHoleScreen = null;
+
     // Sky fall on respawn (like the original): spawns high up and plummets down.
     this.RESPAWN_DROP_HEIGHT = 12;
     this.respawnDrop = false;
@@ -369,8 +376,12 @@ export class Player {
         this.inTunnel = this.climbing === 'down';
         this.climbing = null;
         this.isGrounded = true;
-        // Exited the tunnel on top of the pit: 1s to get clear before climbing back down
-        if (!this.inTunnel) this.climbGrace = 1.0;
+        // Exited the tunnel on top of the pit: 1s to get clear before climbing back down.
+        // The corridor (walls + scorpion) stays alive — it will be cleared by the
+        // pre-load loop as soon as Harry walks into a non-ladder screen.
+        if (!this.inTunnel) {
+          this.climbGrace = 1.0;
+        }
         audio.playGroundThud();
       } else {
         this.isGrounded = false;
@@ -420,8 +431,23 @@ export class Player {
     let targetVz = 0;
     // 0 = face -Z (dir = -1), Math.PI = face +Z (dir = 1)
     const dir = this.targetRotY === Math.PI ? 1 : -1;
-    // Underground shortcut pace (2x); surface pace otherwise.
-    const pace = this.inTunnel ? RUN_SPEED * TUNNEL_SPEED_MULT : RUN_SPEED;
+    // Underground shortcut pace: hazardous/ladder screens use 2x, while an
+    // empty screen uses 3x to shorten the safe transit sections.
+    let paceMultiplier = 1;
+    if (this.inTunnel) {
+      const tunnelScreen = Math.floor(-this.z / SCREEN_LENGTH);
+      const tunnelType = world.getScreenType(tunnelScreen);
+      const hasLadder = tunnelType === 'HOLE_SINGLE' || tunnelType === 'HOLE_TRIPLE';
+      const hasScorpion = world.activeHazards?.some((hazard) =>
+        hazard.type === 'scorpion' &&
+        hazard.screenIndex === -1 &&
+        Math.floor(-hazard.baseZ / SCREEN_LENGTH) === tunnelScreen
+      );
+      paceMultiplier = hasLadder || hasScorpion
+        ? TUNNEL_SPEED_MULT
+        : EMPTY_TUNNEL_SPEED_MULT;
+    }
+    const pace = RUN_SPEED * paceMultiplier;
 
     if (this.moveForward || this.padForward) targetVz += pace * dir;
     if (this.moveBackward || this.padBackward) targetVz -= pace * dir;
@@ -434,17 +460,47 @@ export class Player {
     // No barrier at the starting edge: the 255-screen map loops in both
     // directions, so walking behind z = 0 enters screen -1 (phase 255).
 
-    // Tunnel brick walls (authentic dead ends): solid 1m planes, block
-    // passage in both directions (0.6m body clearance each side).
-    if (this.inTunnel && world.activeTunnelWalls) {
-      for (const wl of world.activeTunnelWalls) {
+    // Tunnel brick walls (authentic dead ends): solid barriers that block
+    // passage in both directions, including a fast movement step that skips
+    // over the wall's center coordinate in a single frame.
+    // Dynamic brick walls only collide with Harry while he is underground.
+    // The corridor remains prepared while he clears the surface ladder, so
+    // checking these barriers on the surface would incorrectly block travel.
+    const isUnderground = this.inTunnel || this.climbing === 'down' || this.y < -2;
+    const tunnelWalls = world.activeTunnelWalls?.length
+      ? world.activeTunnelWalls
+      : (world.tunnelCorridorWalls ?? []).map((mesh) => ({
+        z: mesh.position.z + 0.5,
+      }));
+    if (isUnderground && tunnelWalls.length) {
+      for (const wl of tunnelWalls) {
         const lo = wl.z - 1.1;
         const hi = wl.z + 1.1;
-        if (prevZ >= hi && this.z < hi) {
-          this.z = hi;
+        const movingForward = this.z < prevZ;
+        const enteringWall = movingForward
+          ? prevZ >= hi && this.z < hi
+          : prevZ <= lo && this.z > lo;
+        const startedInsideWall = prevZ > lo && prevZ < hi;
+
+        if (enteringWall || startedInsideWall) {
+          // Forward movement is toward lower Z and must stop at the wall's
+          // high-Z face; backward movement stops at its low-Z face.
+          this.z = this.z < prevZ ? hi : lo;
           this.vz = 0;
-        } else if (prevZ <= lo && this.z > lo) {
-          this.z = lo;
+        }
+      }
+
+      // Keep the player inside the span bounded by the two active dead-end
+      // walls. This is a second swept-boundary guard for large movement steps
+      // or a frame in which the wall collision was initialized late.
+      if (tunnelWalls.length >= 2) {
+        const wallPositions = tunnelWalls
+          .map((wall) => wall.z)
+          .sort((a, b) => a - b);
+        const corridorMin = wallPositions[0] + 1.1;
+        const corridorMax = wallPositions[wallPositions.length - 1] - 1.1;
+        if (corridorMin < corridorMax && (this.z < corridorMin || this.z > corridorMax)) {
+          this.z = THREE.MathUtils.clamp(this.z, corridorMin, corridorMax);
           this.vz = 0;
         }
       }
@@ -459,6 +515,23 @@ export class Player {
       this.checkpointZ = -newK * SCREEN_LENGTH - 4;
     } else if (newK < prevK) {
       this.checkpointZ = -(newK + 1) * SCREEN_LENGTH + 4;
+    }
+
+    // Configure the underground shortcut only when Harry enters a ladder
+    // screen from the surface. The prepared corridor remains unchanged while
+    // he travels underground.
+    if (!this.inTunnel && !this.climbing) {
+      const screenType = world.getScreenType(newK);
+      const isHole = screenType === 'HOLE_SINGLE' || screenType === 'HOLE_TRIPLE';
+      if (isHole && this.lastSurfaceHoleScreen !== newK) {
+        // Entered a new ladder screen — pre-configure the corridor immediately
+        world.activateTunnelCorridor(newK);
+        this.lastSurfaceHoleScreen = newK;
+      } else if (!isHole && this.lastSurfaceHoleScreen !== null) {
+        // Left the ladder screen zone — release the corridor
+        world.deactivateTunnelCorridor();
+        this.lastSurfaceHoleScreen = null;
+      }
     }
 
     // Single action button: JUMP (or CLIMB the ladder in the tunnel)
@@ -533,8 +606,11 @@ export class Player {
     // (jumping over avoids both — only climbs down/falls while walking on the ground).
     if (!this.inTunnel && !this.climbing && this.isGrounded && this.y < 0.2 && this.vy <= 0 && this.climbGrace <= 0) {
       const shaft = this.getLadderShaftAt(world, this.z, 0);
-      if (shaft && Math.abs(this.z - shaft.centerZ) < shaft.half - 0.5) {
+      if (shaft && Math.abs(this.z - shaft.centerZ) <= shaft.half) {
         this.climbing = 'down';
+        // Enter tunnel state at the start of the descent so underground
+        // barriers are active throughout the ladder transition.
+        this.inTunnel = true;
         this.climbZ = shaft.centerZ;
         this.isGrounded = false;
         this.vz = 0;
@@ -542,7 +618,7 @@ export class Player {
         return;
       }
       const drop = this.getDropShaftAt(world, this.z);
-      if (drop && Math.abs(this.z - drop.centerZ) < drop.half - 0.5) {
+      if (drop && Math.abs(this.z - drop.centerZ) <= drop.half) {
         // Hole without a ladder: drops straight into the tunnel (already below the rim
         // so it does not stick to the edge — physics takes over the fall from there).
         // Like the original, dropping down costs 100 points.
@@ -666,15 +742,15 @@ export class Player {
             }
           }
           
-          // Water and tar are lethal on contact; no physical shaft is needed.
+          // Water and tar have a shallow physical bottom, independent from the
+          // underground tunnel. Reaching that bottom is still hit-kill.
           if (hazard.type === 'tarpit' || hazard.type === 'water') {
-            if (!DEBUG_GOD_MODE && this.y <= -10) {
+            if (!DEBUG_GOD_MODE && this.y <= PIT_FLOOR_Y) {
               audio.playSink();
               this.die('death.abyss');
             }
           }
-          // No surface under feet for airborne movement.
-          return -10;
+          return PIT_FLOOR_Y;
         }
       }
     }
@@ -685,7 +761,11 @@ export class Player {
         if (Math.abs(z - pitData.z) < pitData.radius) {
           if (world.isQuicksandOpenAt(pitData, z)) {
             // The section under the feet is open!
-            return -10;
+            if (!DEBUG_GOD_MODE && this.y <= PIT_FLOOR_Y) {
+              audio.playSink();
+              this.die('death.quicksand');
+            }
+            return PIT_FLOOR_Y;
           } else {
             // Closed section! Solid ground, safe to run!
             return 0.0;
@@ -697,11 +777,11 @@ export class Player {
     // Log exit pit (spikes): jump over it; falling inside is a hit kill.
     for (const hazard of world.activeHazards) {
       if (hazard.type === 'log_exit_pit' && z >= hazard.minZ && z <= hazard.maxZ) {
-        if (this.y < -0.3) {
+        if (this.y <= PIT_FLOOR_Y) {
           audio.playTrip();
           this.die('death.spikes');
         }
-        return -10;
+        return PIT_FLOOR_Y;
       }
     }
 
@@ -1161,6 +1241,8 @@ export class Player {
     this.climbing = null;
     this.climbGrace = 0;
     this.crocBiteGraceTimer = 0;
+    // Deactivate the tunnel corridor walls and scorpion on any surface respawn
+    if (!tunnelRespawn && world) world.deactivateTunnelCorridor();
 
     // Respawn at the last checkpoint (last boundary strip crossed); if no checkpoint,
     // at the start of the screen where the player died (forward = -Z, start = +Z edge).

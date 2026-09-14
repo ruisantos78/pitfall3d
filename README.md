@@ -35,6 +35,12 @@ Just like in the original Atari 2600 game:
 - **CRT Filter:** Toggleable scanlines, vignette and retro phosphor effect.
 - **8-bit Web Audio Synthesizer:** Self-contained sound effects with no external files needed (jump, vine/yodel, bite, sinking, treasures, footsteps).
 
+### Underground shortcuts and pits
+
+Screens with holes can open a fixed underground shortcut to another hole screen. Only the active entrance and exit ladders are visible; the tunnel ceiling stays closed everywhere else. Brick dead-end walls block movement in both directions.
+
+Empty tunnel sections use `4x` transit speed. Sections containing a ladder or scorpion use normal `1x` speed. Surface pits have their own shallow bottom, about one meter below the trail, separate from the underground tunnel ceiling; reaching that bottom is still lethal.
+
 ---
 
 ## 🚀 How to Run
