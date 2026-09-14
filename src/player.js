@@ -12,6 +12,9 @@ export const GRAVITY = 28.0;
 export const JUMP_VELOCITY = 10.5;
 export const RUN_SPEED = 9.0;
 export const EYE_HEIGHT = 2.2;
+// Grace period after releasing a vine during which an open crocodile mouth
+// cannot kill (enough time to clear the last croc and land back on track).
+export const CROC_BITE_GRACE_DURATION = 1.0;
 
 export class Player {
   constructor(camera, scene) {
@@ -30,10 +33,14 @@ export class Player {
     this.moveBackward = false;
     this.actionPressed = false;
     this.actionJustPressed = false;
+    this.targetRotY = 0; // camera facing: 0 = forward (-Z), Math.PI = back (+Z)
+    this.turnJustPressed = false;
 
     // Vine grabbing state
     this.attachedVine = null; // { vine, centerZ, time }
     this.justReleasedVineTimer = 0;
+    // Crocodile bite immunity right after letting go of a vine.
+    this.crocBiteGraceTimer = 0;
     // Vine just released: ignored until landing or grabbing another vine
     // (prevents re-grabbing the SAME vine mid-air after release).
     this.ignoredVine = null;
@@ -116,10 +123,11 @@ export class Player {
     });
 
     // The mouse is not an action button. Jump and vine release use only
-    // Space/Enter or the round touch button.
+    // Space/Enter or the touch action button.
     const btnFwd = document.getElementById('btn-forward');
     const btnBwd = document.getElementById('btn-backward');
     const btnAct = document.getElementById('btn-action');
+    const btnTurn = document.getElementById('btn-turn');
     const btnTouchToggle = document.getElementById('btn-touch-toggle');
     const touchControls = document.getElementById('mobile-controls');
     this.touchOnly = false;
@@ -183,6 +191,14 @@ export class Player {
         });
       });
     }
+    // Touch turn-around button (same 180° spin as the A/D / arrow keys).
+    if (btnTurn) {
+      btnTurn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        audio.init();
+        this.targetRotY = this.targetRotY === 0 ? Math.PI : 0;
+      });
+    }
   }
 
   // Update physics, movement, vine attachment, and collisions
@@ -202,6 +218,7 @@ export class Player {
     // Cooldown timers
     if (this.tripCooldown > 0) this.tripCooldown -= delta;
     if (this.justReleasedVineTimer > 0) this.justReleasedVineTimer -= delta;
+    if (this.crocBiteGraceTimer > 0) this.crocBiteGraceTimer -= delta;
 
     // Decrement 20-minute countdown
     this.timeRemaining -= delta;
@@ -230,7 +247,8 @@ export class Player {
     if (this.isGrounded && Math.abs(this.y - 0.35) < 0.25) {
       const croc = this.getCrocodileAt(world, this.z);
       // Only bite if on the FRONT MOUTH (Z > croc.z + 0.65). If on the eyes/skull, 100% IMMUNE!
-      if (croc && croc.isOpen && this.z > croc.z + 0.65) {
+      // Right after releasing a vine the open mouth cannot kill (grace to clear the last croc).
+      if (croc && croc.isOpen && this.z > croc.z + 0.65 && this.crocBiteGraceTimer <= 0) {
         audio.playChomp();
         this.die('death.crocBite');
         return;
@@ -542,6 +560,10 @@ export class Player {
                 if (DEBUG_GOD_MODE) {
                    return 0.35; // Act as if mouth is closed, step on it safely
                 }
+                // Vine-release grace: step over the open mouth safely to land back on track.
+                if (this.crocBiteGraceTimer > 0) {
+                  return 0.35;
+                }
                 // Stepped directly into the open mouth!
                 audio.playChomp();
                 this.die('death.crocMouth');
@@ -726,6 +748,9 @@ export class Player {
     // (~3.8m away at 11 m/s), short enough to allow vine-to-vine mid-air
     // transfers on the double-vine crocodile screens.
     this.justReleasedVineTimer = 0.35;
+    // Open croc mouths cannot kill for a short while: time to clear the last
+    // crocodile and land back on the track even if its mouth is open.
+    this.crocBiteGraceTimer = CROC_BITE_GRACE_DURATION;
     // The released vine stays ignored until landing: the post-release flight never
     // re-grabs the SAME vine, only the next one.
     this.ignoredVine = this.attachedVine;
@@ -905,6 +930,7 @@ export class Player {
     }
     
     this.deathReasonKey = reasonKey;
+    this.crocBiteGraceTimer = 0;
 
     // Fade to black on death
     const fade = document.getElementById('death-fade');
@@ -997,6 +1023,7 @@ export class Player {
     this.inTunnel = false;
     this.climbing = null;
     this.climbGrace = 0;
+    this.crocBiteGraceTimer = 0;
 
     // Respawn at the last checkpoint (last boundary strip crossed); if no checkpoint,
     // at the start of the screen where the player died (forward = -Z, start = +Z edge).
@@ -1063,6 +1090,7 @@ export class Player {
     this.deathReasonKey = 'death.lifeLost';
     this.attachedVine = null;
     this.ignoredVine = null;
+    this.crocBiteGraceTimer = 0;
     if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
     this.tripCooldown = 0;
     this.isTripped = false;

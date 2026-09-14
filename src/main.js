@@ -20,6 +20,8 @@ class Game {
 
     // Start render loop (render backdrop while paused)
     this.animate = this.animate.bind(this);
+    // Debug hook (dev only): lets headless perf probes inspect the live game.
+    if (import.meta.env.DEV) window.__game = this;
     requestAnimationFrame(this.animate);
   }
 
@@ -38,14 +40,16 @@ class Game {
       150
     );
 
-    // 3. Renderer
+    // 3. Renderer (coarse pointers = phones/tablets: no MSAA, capped
+    // pixel ratio and shadows — the fragment load is what melts mobile GPUs)
+    const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: true, // smooth voxel edges
+      antialias: !coarse, // smooth voxel edges on desktop only
       powerPreference: 'high-performance',
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, coarse ? 1.5 : 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -62,7 +66,8 @@ class Game {
     const sunLight = new THREE.DirectionalLight(0xfffae0, 1.5);
     sunLight.position.set(15, 30, 20);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.set(2048, 2048);
+    const coarseShadow = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+    sunLight.shadow.mapSize.set(coarseShadow ? 1024 : 2048, coarseShadow ? 1024 : 2048);
     sunLight.shadow.camera.left = -25;
     sunLight.shadow.camera.right = 25;
     sunLight.shadow.camera.top = 25;
@@ -83,8 +88,8 @@ class Game {
     this.world = new World(this.scene);
     this.player = new Player(this.camera, this.scene);
 
-    // Pre-generate initial screens (Screen 0, 1, 2)
-    this.world.updateVisibleScreens(0);
+    // Pre-generate initial screens (Screen 0, 1, 2) synchronously behind the menu
+    for (let i = 0; i <= 2; i++) this.world.getOrCreateScreen(i);
   }
 
   initHUD() {
@@ -288,13 +293,22 @@ class Game {
 
     if (this.isRunning) {
       // 1. Update Dynamic World Entities (Vines, Logs, Crocodiles, Campfires)
-      this.world.update(delta);
+      // Player position drives the pooled-light assignment (tunnel lights only
+      // compete for slots while Harry is underground; surface lights only
+      // while he is up there).
+      this.world.update(delta, this.player.z, this.player.inTunnel, this.player.climbing);
 
       // 2. Update First-Person Player Physics & Actions
       this.player.update(delta, this.world);
 
       // 3. Update Current Screen Index based on Player Z
       const currentScreenIndex = Math.max(0, Math.floor(-this.player.z / SCREEN_LENGTH));
+      // Prefetch the screen after next while approaching the checkpoint (~2s
+      // ahead at full speed): the boundary-crossing frame then builds nothing.
+      const nextBoundaryZ = -(currentScreenIndex + 1) * SCREEN_LENGTH;
+      if (this.player.z - nextBoundaryZ < 18) {
+        this.world.prefetchScreen(currentScreenIndex + 2);
+      }
       this.world.updateVisibleScreens(currentScreenIndex);
 
       // 4. Update HUD

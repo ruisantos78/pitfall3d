@@ -105,7 +105,7 @@ pitfall/
   - Bits decode exactly like the original: `0..2` ground object, `3..5` scene (`0` single hole, `1` triple holes, `2` tar pit, `3` blue swamp, `4` crocs, `5` treasure quicksand, `6` quicksand+vine, `7` blue quicksand), `6..7` tree pattern. Scene 4 splits by `treePat` parity: `CROCODILE_VINE` (vine crossing) vs `CROCODILE_POND` (croc-hopping only).
   - HUD shows the looping phase number (`001`..`255`).
 - **Underground (continuous tunnel + ladder scenes `HOLE_SINGLE`/`HOLE_TRIPLE`):**
-  - EVERY screen has a tunnel stretch (`addTunnel`: floor at `TUNNEL_FLOOR_Y = -8`, side dirt walls, warm `PointLight`, NO end walls) — the underground runs seamlessly through the whole game; climb up at any ladder shaft.
+  - EVERY screen has a tunnel stretch (`addTunnel`: floor at `TUNNEL_FLOOR_Y = -8`, side dirt walls, warm lamp/torch glow via pooled-light emitters, NO end walls) — the underground runs seamlessly through the whole game; climb up at any ladder shaft.
   - Cave ceiling (`addCaveCeiling`): dark slab at `y=-3` hiding the surface world from below, with holes ONLY over ladder shafts (light + passage); solid everywhere else.
   - Ladder shafts (`addLadderShaft`, NO surrounding walls, just the wooden ladder — ladder ONLY in the middle hole, like the original; side holes drop straight in). Walking in (grounded) auto-grabs and climbs down at 7 m/s; jumping over avoids it; shafts never kill. `SPACE` under a shaft climbs back up (1s anti-regrab grace).
   - Surface pits are shallow (2.5m) on purpose so they never invade the corridor below.
@@ -114,14 +114,15 @@ pitfall/
   - `HOLE_SINGLE` / `HOLE_TRIPLE` (ladder shafts + tunnel, see above)
   - `DISAPPEARING_QUICKSAND` (20m moving quicksand)
   - `QUICKSAND_VINE` (20m blue lake with vine — vine-only crossing)
-  - Rolling logs (1/2/3 from `obj 0..3`, single drop point + black spiked exit pit: logs are impaled and cease to exist; hero falling on spikes is hit kill via `death.spikes`)
+  - Rolling logs (1/2/3 from `obj 0..3`, single drop point + black spiked exit pit: on touching the spikes the log crumbles into 16 wooden cubes(Graphics `spawnLogShatter`, silent by design); hero falling on spikes is hit kill via `death.spikes`)
   - `CROCODILE_VINE` (20m crocodile pond, same size as the vine-only lake, with 3 small crocodiles evenly spaced at `[6.5, 0, -6.5]` (6.5m, jumpable nose-to-nose) + one vine at the pit middle: the whole pond can be crossed vine-only, crocs are the backup path)
   - `CROCODILE_POND` (same pond, no vine — croc-hopping only)
   - Campfires, stationary logs, treasures (surface overlays from `obj 4..6` + scene 5)
-- **Dynamic Updates (`world.update(delta)`):**
+- **Dynamic Updates (`world.update(delta, playerZ, inTunnel, climbing)`):**
   - Vine swing animation (`v.vine.pivot.rotation.x`).
   - 4.4s crocodile mouth cycle (closed, orange-eyed alert, red open, snap shut).
   - 9.9s quicksand cycle (fully closed pause for 0.5s, entry→exit opening wave for 2.2s, fully open for 5.0s, entry→exit closing wave from the hero's edge for 2.2s, surfable at ~9.1 m/s vs Harry's 9.0).
+  - Fixed pool of 8 `PointLight`s (never added/removed, so shaders compile once): per-frame the nearest emitters (tunnel lamps/torches, scorpion, campfires) win a slot. Zone-split: on the surface only surface emitters are eligible, underground (or climbing) only tunnel ones — each zone stops paying for the other's lights.
 
 #### [`src/models.js`](file:///home/ruisantos/Projects/pitfall/src/models.js)
 - `createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12)`:
@@ -133,7 +134,7 @@ pitfall/
   - Articulated jaw from `Z = 3` to `12` with X-axis rotation and sharp teeth.
   - Top of the platform sits at `Y = 0.35` (mesh positioned at `Y = -0.31`).
 - `createLogModel(voxelSize = 0.18, lengthVoxels = 16)`:
-  - Log cylinder 0.90m in diameter (0.45m radius); rolling/stationary logs use 28 voxels (~5m, yellow track only).
+  - Log cylinder 0.90m in diameter (0.45m radius); rolling/stationary logs use 38 voxels (~7m, yellow track plus half of each green edge).
   - Centered on the X rotation axis and resting at `Y = 0.45`, ensuring perfect rolling on the ground without sinking.
 - `createCampfireModel(voxelSize = 0.22)`:
   - Base with stone ring, ash bed and live embers grounded at `Y = 0.0` with `center = 'bottom'`.
@@ -144,7 +145,7 @@ pitfall/
 - `createScorpionModel(voxelSize = 0.28)`:
   - Giant high-visibility arcade scorpion with vibrant red carapace and obsidian/gold bands.
   - Tall arched tail with stinger and glowing yellow venom bulb at `Y = 6` (~1.68m tall).
-  - Dynamic `THREE.PointLight(0xffcc00)` point light casting warning glow on ground and vegetation.
+  - Dynamic venom glow via a pooled-light emitter anchor (no per-screen `PointLight`, so screen crossings never recompile shaders).
   - Glowing cyan eyes, 8 articulated legs and menacing front pincers.
 
 #### [`src/voxel.js`](file:///home/ruisantos/Projects/pitfall/src/voxel.js)

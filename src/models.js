@@ -423,13 +423,14 @@ export function createScorpionModel(voxelSize = 0.28) {
   stingerGlowMesh.position.set(0, 5.5 * voxelSize, -3.0 * voxelSize);
   group.add(stingerGlowMesh);
 
-  // 7. Venom Stinger Warning PointLight (illuminates path and warns player)
-  const venomLight = new THREE.PointLight(0xffcc00, 1.4, 5.0);
-  venomLight.position.set(0, 5.8 * voxelSize, -3.0 * voxelSize);
-  group.add(venomLight);
+  // 7. Venom Stinger Warning glow anchor (world assigns a pooled PointLight here;
+  // per-screen lights would recompile every shader on each screen crossing).
+  const venomAnchor = new THREE.Object3D();
+  venomAnchor.position.set(0, 5.8 * voxelSize, -3.0 * voxelSize);
+  group.add(venomAnchor);
 
   group.userData = {
-    light: venomLight,
+    lightAnchor: venomAnchor,
     mesh: scorpMesh,
     voxelSize: voxelSize,
   };
@@ -608,17 +609,18 @@ export function createCampfireModel(voxelSize = 0.22) {
     });
   }
 
-  // 6. Dynamic Warm Point Light
-  const fireLight = new THREE.PointLight(0xff7722, 2.2, 12);
-  fireLight.position.set(0, 1.1, 0);
-  group.add(fireLight);
+  // 6. Warm glow anchor (world assigns a pooled PointLight here; per-screen
+  // lights would recompile every shader on each screen crossing).
+  const fireAnchor = new THREE.Object3D();
+  fireAnchor.position.set(0, 1.1, 0);
+  group.add(fireAnchor);
 
   return {
     group,
     coreFlame: coreMesh,
     outerFlames: [mainFlame, sideFlame1, sideFlame2],
     embers,
-    light: fireLight,
+    lightAnchor: fireAnchor,
   };
 }
 

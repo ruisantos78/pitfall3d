@@ -33,6 +33,29 @@ export class World {
     this.torchTime = 0;
     this.activeOpeningPits = [];
 
+    // Fixed pool of PointLights (constant count => shaders compile once and
+    // never again on screen crossings). Per-frame the nearest light emitters
+    // around the player are assigned to pool slots; the rest stay parked at
+    // intensity 0 (still counted, keeping every program cache key stable).
+    this.POOL_SIZE = 8;
+    this.lightPool = [];
+    for (let i = 0; i < this.POOL_SIZE; i++) {
+      const pl = new THREE.PointLight(0xffffff, 0, 1);
+      scene.add(pl);
+      this.lightPool.push(pl);
+    }
+    // { screenIndex, color, distance, intensity, getPos(Vector3)->Vector3 }
+    this.lightEmitters = [];
+    this._poolVec = new THREE.Vector3();
+
+    // Log shatter debris (shared unit cube + 3 wood materials: no per-burst
+    // allocation, nothing to dispose on screen removal).
+    this.logDebris = [];
+    this.debrisGeo = new THREE.BoxGeometry(1, 1, 1);
+    this.debrisMats = [0x784414, 0x542d0a, 0x9a5c20].map(
+      (c) => new THREE.MeshLambertMaterial({ color: c })
+    );
+
     // Base materials
     this.groundMaterial = createVoxelMaterial();
     this.waterMaterial = new THREE.MeshLambertMaterial({
@@ -44,12 +67,39 @@ export class World {
 
     // Shared tree template for cloning
     this.treeTemplate = createTreeModel(0.5);
+    // Shared log template for cloning (identical on every screen: cloning skips
+    // the voxel face-culling rebuild and reuses the uploaded GPU buffers).
+    this.logTemplate = createLogModel(0.18, 38);
+
+    // Shared GPU resources (never disposed on screen removal: clones reuse them).
+    this.sharedGeometries = new Set();
+    this.sharedMaterials = new Set();
+    for (const tpl of [this.treeTemplate, this.logTemplate]) {
+      tpl.traverse((o) => {
+        if (o.isMesh) {
+          if (o.geometry) this.sharedGeometries.add(o.geometry);
+          const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+          for (const m of mats) this.sharedMaterials.add(m);
+        }
+      });
+    }
+    // The log template material is the models-wide shared voxel material, so
+    // registering it also protects every other voxel model from disposal.
+    // Debris resources are shared too (spawned chunks reuse them forever).
+    this.sharedGeometries.add(this.debrisGeo);
+    for (const m of this.debrisMats) this.sharedMaterials.add(m);
+    for (const m of [this.groundMaterial, this.waterMaterial, this.pitMaterial,
+      this.tunnelWallMaterial, this.tunnelFloorMaterial, this.caveCeilMaterial,
+      this.ladderMaterial, this.spikeMaterial]) {
+      if (m) this.sharedMaterials.add(m);
+    }
 
     // Underground: dirt for tunnel walls and wood for the ladder
     this.tunnelWallMaterial = new THREE.MeshLambertMaterial({ color: 0x4a3826 });
     this.tunnelFloorMaterial = new THREE.MeshLambertMaterial({ color: 0x5a4128 });
     this.caveCeilMaterial = new THREE.MeshLambertMaterial({ color: 0x2e2418 });
     this.ladderMaterial = new THREE.MeshLambertMaterial({ color: 0x8a6a3a });
+    this.spikeMaterial = new THREE.MeshLambertMaterial({ color: 0x9aa0a8 });
   }
 
   // Generate or get screen at index (0, 1, 2, ...)
@@ -67,15 +117,23 @@ export class World {
   // Update visible screens around current player Z
   updateVisibleScreens(currentScreenIndex) {
     const keepRange = 2;
+    // Build missing screens, at most ONE per frame (nearest first): a full
+    // screen build uploads ~250k verts to the GPU, so it must never share a
+    // frame with the checkpoint crossing — prefetch (see prefetchScreen) builds
+    // the next screen while the player is still mid-screen.
+    const missing = [];
     for (let i = currentScreenIndex - 1; i <= currentScreenIndex + keepRange; i++) {
-      if (i >= 0 && !this.screens.has(i)) {
-        this.getOrCreateScreen(i);
-      }
+      if (i >= 0 && !this.screens.has(i)) missing.push(i);
+    }
+    missing.sort((a, b) => Math.abs(a - currentScreenIndex) - Math.abs(b - currentScreenIndex));
+    if (missing.length > 0) {
+      this.getOrCreateScreen(missing[0]);
     }
 
-    // Cleanup distant screens to keep memory tight
+    // Cleanup distant screens to keep memory tight (keep exactly one behind:
+    // with prefetch the steady state is 4 screens alive, never more).
     for (const [idx, screen] of this.screens.entries()) {
-      if (idx < currentScreenIndex - 2 || idx > currentScreenIndex + keepRange + 1) {
+      if (idx < currentScreenIndex - 1 || idx > currentScreenIndex + keepRange + 1) {
         this.scene.remove(screen.group);
         // remove items from active lists
         this.removeScreenEntities(screen);
@@ -84,7 +142,32 @@ export class World {
     }
   }
 
+  // Builds screen i ahead of time (no cleanup): call while the player is still
+  // approaching the next checkpoint so the boundary-crossing frame builds nothing.
+  prefetchScreen(screenIndex) {
+    if (screenIndex >= 0 && !this.screens.has(screenIndex)) {
+      this.getOrCreateScreen(screenIndex);
+    }
+  }
+
+  // Releases per-screen GPU resources (leaked VRAM/GC pressure otherwise:
+  // scene.remove() alone never frees uploaded buffers).
+  disposeScreenGroup(group) {
+    group.traverse((o) => {
+      if (o.isMesh) {
+        if (o.geometry && !this.sharedGeometries.has(o.geometry)) o.geometry.dispose();
+        const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+        for (const m of mats) {
+          if (!this.sharedMaterials.has(m)) m.dispose();
+        }
+        // Textures are all shared (hazard stripe), never disposed here.
+      }
+    });
+  }
+
   removeScreenEntities(screen) {
+    this.disposeScreenGroup(screen.group);
+    this.lightEmitters = this.lightEmitters.filter(e => e.screenIndex !== screen.index);
     this.activeVines = this.activeVines.filter(v => v.screenIndex !== screen.index);
     this.activeCrocodiles = this.activeCrocodiles.filter(c => c.screenIndex !== screen.index);
     this.activeRollingLogs = this.activeRollingLogs.filter(l => l.screenIndex !== screen.index);
@@ -93,6 +176,7 @@ export class World {
     this.animatedCampfires = this.animatedCampfires.filter(c => c.screenIndex !== screen.index);
     this.animatedTorches = this.animatedTorches.filter(t => t.screenIndex !== screen.index);
     this.activeOpeningPits = this.activeOpeningPits.filter(p => p.screenIndex !== screen.index);
+    this.logDebris = this.logDebris.filter(d => d.screenIndex !== screen.index);
   }
 
   buildScreen(index) {
@@ -340,7 +424,9 @@ export class World {
       case 'BLUE_QUICKSAND':
         // Original scene 7: blue quicksand, no vine (surfable like black).
         this.addOpeningQuicksandPit(group, index, midZ);
-        addOverlayObject(midZ + 14);
+        // Overlay base at +20 (not +14): with two fixed logs (obj 5 at +25/+15)
+        // both fit BEFORE the 20m pit (entry edge at midZ+10).
+        addOverlayObject(midZ + 20);
         this.addTreasure(group, index, midZ - 14, 'silver');
         break;
 
@@ -348,7 +434,9 @@ export class World {
         // Original scene 3: blue swamp + vine.
         this.addWaterPond(group, index, midZ, 20);
         this.addVine(group, index, midZ);
-        addOverlayObject(midZ + 14);
+        // Overlay base at +20 (not +14): with two fixed logs (obj 5 at +25/+15)
+        // both fit BEFORE the 20m pit (entry edge at midZ+10).
+        addOverlayObject(midZ + 20);
         this.addTreasure(group, index, midZ - 14, 'gold');
         break;
 
@@ -356,7 +444,9 @@ export class World {
         // Original scene 2: black pit + vine.
         this.addTarPit(group, index, midZ, 20);
         this.addVine(group, index, midZ);
-        addOverlayObject(midZ + 14);
+        // Overlay base at +20 (not +14): with two fixed logs (obj 5 at +25/+15)
+        // both fit BEFORE the 20m pit (entry edge at midZ+10).
+        addOverlayObject(midZ + 20);
         this.addTreasure(group, index, midZ - 14, 'diamond');
         break;
 
@@ -379,7 +469,9 @@ export class World {
         // Original scene 6: black quicksand + vine.
         this.addOpeningQuicksandPit(group, index, midZ);
         this.addVine(group, index, midZ);
-        addOverlayObject(midZ + 14);
+        // Overlay base at +20 (not +14): with two fixed logs (obj 5 at +25/+15)
+        // both fit BEFORE the 20m pit (entry edge at midZ+10).
+        addOverlayObject(midZ + 20);
         this.addTreasure(group, index, midZ - 14, 'gold');
         break;
 
@@ -392,8 +484,10 @@ export class World {
   // --- Hazard Builders ---
 
   addStationaryLog(group, screenIndex, z) {
-    // Stationary log only on the yellow track (28 voxels ≈ 5m, no green coverage).
-    const log = createLogModel(0.18, 28);
+    // Wide log covering the yellow track plus half of each green edge
+    // (38 voxels ≈ 7m): rolls visually over the pit margins.
+    // Cloned from the shared template (no voxel rebuild, shared GPU buffers).
+    const log = this.logTemplate.clone();
     log.position.set(0, 0.45, z);
     group.add(log);
 
@@ -469,8 +563,10 @@ export class World {
   static ROLLING_CYCLE = 9.8;
 
   addRollingLog(group, screenIndex, startZ, endZ, idx, count) {
-    // Wide log only on the yellow track (28 voxels ≈ 5m, no green coverage).
-    const log = createLogModel(0.18, 28);
+    // Wide log covering the yellow track plus half of each green edge
+    // (38 voxels ≈ 7m): rolls visually over the pit margins.
+    // Cloned from the shared template (no voxel rebuild, shared GPU buffers).
+    const log = this.logTemplate.clone();
     const dropZ = this.rollingDropZ(endZ);
     // Sky drop always from the screen's single drop point; logs stagger in time
     // (idx/count of cycle), with no randomness.
@@ -488,6 +584,7 @@ export class World {
     const logData = {
       type: 'rolling_log',
       screenIndex,
+      group, // debris spawns into the same screen group
       mesh: log,
       landingShadow: alert.group,
       alertDisc: alert.disc,
@@ -515,6 +612,65 @@ export class World {
 
     this.activeRollingLogs.push(logData);
     this.activeHazards.push(logData);
+  }
+
+  // Log shatter burst: the impaled log crumbles into flying wooden cubes.
+  spawnLogShatter(group, screenIndex, z) {
+    for (let i = 0; i < 16; i++) {
+      const size = 0.14 + Math.random() * 0.22;
+      const mesh = new THREE.Mesh(
+        this.debrisGeo,
+        this.debrisMats[i % this.debrisMats.length]
+      );
+      mesh.position.set(
+        (Math.random() - 0.5) * 6.4,
+        0.2 + Math.random() * 0.5,
+        z + (Math.random() - 0.5) * 1.2
+      );
+      mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      mesh.scale.setScalar(size);
+      group.add(mesh);
+      this.logDebris.push({
+        screenIndex,
+        mesh,
+        size,
+        vx: (Math.random() - 0.5) * 8,
+        vy: 2.5 + Math.random() * 4.5,
+        vz: (Math.random() - 0.5) * 6,
+        rx: (Math.random() - 0.5) * 12,
+        ry: (Math.random() - 0.5) * 12,
+        life: 0.7 + Math.random() * 0.4,
+      });
+    }
+  }
+
+  // Debris physics: gravity, ground bounce, spin, shrink-out.
+  updateLogDebris(delta) {
+    for (let i = this.logDebris.length - 1; i >= 0; i--) {
+      const d = this.logDebris[i];
+      d.life -= delta;
+      if (d.life <= 0) {
+        d.mesh.removeFromParent(); // shared geo/mats: nothing to dispose
+        this.logDebris.splice(i, 1);
+        continue;
+      }
+      d.vy -= 22 * delta;
+      d.mesh.position.x += d.vx * delta;
+      d.mesh.position.y += d.vy * delta;
+      d.mesh.position.z += d.vz * delta;
+      const floorY = d.size / 2;
+      if (d.mesh.position.y < floorY) {
+        d.mesh.position.y = floorY;
+        d.vy *= -0.35;
+        d.vx *= 0.6;
+        d.vz *= 0.6;
+        d.rx *= 0.6;
+        d.ry *= 0.6;
+      }
+      d.mesh.rotation.x += d.rx * delta;
+      d.mesh.rotation.y += d.ry * delta;
+      d.mesh.scale.setScalar(d.size * Math.min(1, d.life / 0.3));
+    }
   }
 
   // Boundary flags at the start and end of each screen: visual border markers
@@ -560,9 +716,6 @@ export class World {
     pitMesh.position.set(0, -0.6, centerZ);
     group.add(pitMesh);
     // Spikes at the bottom: make it clear this area is not to be entered.
-    if (!this.spikeMaterial) {
-      this.spikeMaterial = new THREE.MeshLambertMaterial({ color: 0x9aa0a8 });
-    }
     const spikeGeo = new THREE.ConeGeometry(0.32, 2.0, 6);
     for (let x = -4; x <= 4; x += 1) {
       const spike = new THREE.Mesh(spikeGeo, this.spikeMaterial);
@@ -680,9 +833,15 @@ export class World {
       group.add(wall);
     }
 
-    const lamp = new THREE.PointLight(0xffb060, 25, 50);
-    lamp.position.set(0, TUNNEL_FLOOR_Y + 3.5, midZ);
-    group.add(lamp);
+    const lampPos = new THREE.Vector3(0, TUNNEL_FLOOR_Y + 3.5, midZ);
+    this.lightEmitters.push({
+      screenIndex,
+      underground: true, // only assigned to a pool slot while the player is down there
+      color: 0xffb060,
+      distance: 50,
+      intensity: 25,
+      getPos: (v) => v.copy(lampPos),
+    });
 
     // Tunnel torches marking underground checkpoints (alternate sides like the
     // surface flags; brazier only, no dedicated light of their own).
@@ -709,14 +868,21 @@ export class World {
       const ember = new THREE.Mesh(emberGeo, emberMat);
       ember.position.y = 1.0;
       torch.add(ember);
-      const glow = new THREE.PointLight(0xff8030, 6, 11);
-      glow.position.y = 1.1;
-      torch.add(glow);
+      const glowPos = new THREE.Vector3(x, TUNNEL_FLOOR_Y + 2.5 + 1.1, z);
       torch.position.set(x, TUNNEL_FLOOR_Y + 2.5, z);
       group.add(torch);
+      const torchEmitter = {
+        screenIndex,
+        underground: true, // only assigned to a pool slot while the player is down there
+        color: 0xff8030,
+        distance: 11,
+        intensity: 6,
+        getPos: (v) => v.copy(glowPos),
+      };
+      this.lightEmitters.push(torchEmitter);
       this.animatedTorches.push({
         screenIndex,
-        light: glow,
+        emitter: torchEmitter,
         seed: Math.random() * 10,
       });
     }
@@ -867,9 +1033,18 @@ export class World {
     campfire.group.position.set(0, 0, z);
     group.add(campfire.group);
 
+    const fireEmitter = {
+      screenIndex,
+      color: 0xff7722,
+      distance: 12,
+      intensity: 2.2,
+      getPos: (v) => v.set(0, 1.1, z),
+    };
+    this.lightEmitters.push(fireEmitter);
     this.animatedCampfires.push({
       screenIndex,
       campfire: campfire,
+      emitter: fireEmitter,
       time: Math.random() * 10,
     });
 
@@ -886,7 +1061,7 @@ export class World {
     scorpion.position.set(0, groundY, z);
     group.add(scorpion);
 
-    this.activeHazards.push({
+    const hazard = {
       type: 'scorpion',
       screenIndex,
       mesh: scorpion,
@@ -895,7 +1070,26 @@ export class World {
       patrolRange,
       time: 0,
       radius: 1.2,
-    });
+    };
+    this.activeHazards.push(hazard);
+    // Venom glow follows the patrolling scorpion (mesh transform applied).
+    const anchorLocal = scorpion.userData?.lightAnchor?.position?.clone() ?? new THREE.Vector3();
+    const followQuat = new THREE.Quaternion();
+    const followPos = new THREE.Vector3();
+    const venomEmitter = {
+      screenIndex,
+      underground: true, // only assigned to a pool slot while the player is down there
+      color: 0xffcc00,
+      distance: 5,
+      intensity: 1.4,
+      getPos: (v) => {
+        scorpion.getWorldQuaternion(followQuat);
+        followPos.copy(anchorLocal).applyQuaternion(followQuat);
+        return v.copy(scorpion.position).add(followPos);
+      },
+    };
+    this.lightEmitters.push(venomEmitter);
+    hazard.emitter = venomEmitter;
   }
 
   addTreasure(group, screenIndex, z, type = 'gold') {
@@ -916,7 +1110,7 @@ export class World {
   }
 
   // Update dynamic elements (animations, rolling logs, vine pendulum)
-  update(delta) {
+  update(delta, playerZ = 0, inTunnel = false, climbing = null) {
     // 1. Update Swinging Vines
     this.activeVines.forEach(v => {
       v.time += delta * v.vine.speed;
@@ -1021,9 +1215,9 @@ export class World {
         l.mesh.position.y = l.y;
         l.mesh.rotation.x += delta * 3; // gentle spin during the fall
       } else if (l.fallingIntoPit) {
-        // The log reaches the spike pit and is impaled: CEASES TO EXIST immediately
-        // (does not continue falling) and waits its next turn in the queue
-        // (nextDrop was already scheduled +1 cycle at drop time).
+        // The log reaches the spike pit and is impaled: it touches the spikes
+        // and crumbles into cubes (never continues falling), then waits its
+        // next turn in the queue (nextDrop already scheduled +1 cycle at drop).
         l.vy -= 30 * delta;
         l.y += l.vy * delta;
         l.z = l.exitPitZ;
@@ -1031,9 +1225,9 @@ export class World {
         l.mesh.position.z = l.z;
         l.mesh.rotation.x += delta * 10;
 
-        if (l.y <= -0.6) {
-          // Impaled: disappears and waits for next turn (nextDrop already scheduled
-          // at drop time — the exact cycle is maintained forever).
+        if (l.y <= 0.2) {
+          // Touched the spikes: shatter burst, hide the log, wait for next turn.
+          this.spawnLogShatter(l.group, l.screenIndex, l.z);
           l.waiting = true;
           l.falling = false;
           l.fallingIntoPit = false;
@@ -1061,10 +1255,13 @@ export class World {
       }
     });
 
+    // 3b. Log shatter debris physics (cubes flying off the spike pit).
+    this.updateLogDebris(delta);
+
     // 4b. Tunnel torch flicker (small, trembling warm light)
     this.torchTime += delta;
     this.animatedTorches.forEach(t => {
-      t.light.intensity = 6 + Math.sin(this.torchTime * 13 + t.seed) * 1.3 +
+      t.emitter.intensity = 6 + Math.sin(this.torchTime * 13 + t.seed) * 1.3 +
         Math.sin(this.torchTime * 29 + t.seed * 2) * 0.7;
     });
 
@@ -1108,9 +1305,9 @@ export class World {
         });
       }
 
-      // D. Dynamic Warm Fire Light Flicker
-      if (c.light) {
-        c.light.intensity = 2.0 + Math.sin(t * 18) * 0.4 + (Math.random() - 0.5) * 0.3;
+      // D. Dynamic Warm Fire Light Flicker (pooled light assigned per-frame)
+      if (f.emitter) {
+        f.emitter.intensity = 2.0 + Math.sin(t * 18) * 0.4 + (Math.random() - 0.5) * 0.3;
       }
     });
 
@@ -1126,8 +1323,8 @@ export class World {
       s.mesh.rotation.z = Math.sin(s.time * 12) * 0.04;
       s.mesh.position.y = (s.baseY ?? 0.08) + Math.abs(Math.sin(s.time * 12)) * 0.03;
 
-      if (s.mesh.userData && s.mesh.userData.light) {
-        s.mesh.userData.light.intensity = 1.4 + Math.sin(s.time * 8) * 0.5;
+      if (s.emitter) {
+        s.emitter.intensity = 1.4 + Math.sin(s.time * 8) * 0.5;
       }
     });
 
@@ -1210,5 +1407,34 @@ export class World {
       p.isOpen = openCount > 0;
       if (openCount > 0) p.wasOpen = true;
     });
+
+    // 8. Assign pooled PointLights to the nearest eligible emitters.
+    // Zone-split: on the surface only surface emitters (campfires) compete
+    // for slots; underground (or climbing the shaft) only tunnel lamps,
+    // torches and the scorpion glow. The pool count never changes, so shaders
+    // never recompile — and each zone stops paying for the other's lights.
+    this.updateLightPool(playerZ, !!(inTunnel || climbing));
+  }
+
+  updateLightPool(playerZ, underground) {
+    const eligible = [];
+    for (const e of this.lightEmitters) {
+      if (!!e.underground !== underground) continue;
+      e.getPos(this._poolVec);
+      eligible.push({ e, dz: Math.abs(this._poolVec.z - playerZ) });
+    }
+    eligible.sort((a, b) => a.dz - b.dz);
+    for (let i = 0; i < this.lightPool.length; i++) {
+      const slot = this.lightPool[i];
+      const pick = eligible[i];
+      if (!pick) {
+        slot.intensity = 0; // parked: still counted, keeps shaders stable
+        continue;
+      }
+      pick.e.getPos(slot.position);
+      slot.color.setHex(pick.e.color);
+      slot.distance = pick.e.distance;
+      slot.intensity = pick.e.intensity;
+    }
   }
 }
