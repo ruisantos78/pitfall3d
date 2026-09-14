@@ -4,6 +4,63 @@ import { createVoxelGeometry, createVoxelMaterial } from './voxel.js';
 
 const SHARED_MATERIAL = createVoxelMaterial();
 
+// ---------------------------------------------------------------------------
+// Shared GPU resource caches: identical models across the procedural world
+// reuse the same BufferGeometry / materials, so screen builds only create
+// lightweight meshes and VRAM stays flat (nothing to dispose per screen).
+// ---------------------------------------------------------------------------
+const GEO_CACHE = new Map();
+const GEO_SET = new Set();
+const SHARED_MATS = new Set();
+
+// Memoize any geometry by key (build callback runs once).
+export function memoGeometry(key, build) {
+  let geo = GEO_CACHE.get(key);
+  if (!geo) {
+    geo = build();
+    GEO_CACHE.set(key, geo);
+    GEO_SET.add(geo);
+  }
+  return geo;
+}
+
+// Memoized createVoxelGeometry (same args + cache key). Extra args kept for
+// backward compatibility with earlier bevel calls; they are ignored now that
+// the bevel pass was reverted (cubes are flush/solid again).
+function cachedVoxelGeo(key, voxels, voxelSize, center) {
+  return memoGeometry(key, () => createVoxelGeometry(voxels, voxelSize, center));
+}
+
+// True when the geometry belongs to the shared model cache (never dispose).
+export function isSharedModelGeometry(geo) {
+  return GEO_SET.has(geo);
+}
+
+// Cached plain unlit material by color.
+export function sharedBasicMaterial(hex) {
+  const key = `basic:${hex}`;
+  let mat = GEO_CACHE.get(key);
+  if (!mat) {
+    mat = new THREE.MeshBasicMaterial({ color: hex });
+    GEO_CACHE.set(key, mat);
+    SHARED_MATS.add(mat);
+  }
+  return mat;
+}
+
+// True when the material belongs to a shared cache (never dispose).
+export function isSharedModelMaterial(mat) {
+  return SHARED_MATS.has(mat);
+}
+
+// Vertex-colored unlit material shared by flames and treasures.
+const VERTEX_BASIC = new THREE.MeshBasicMaterial({ vertexColors: true });
+SHARED_MATS.add(VERTEX_BASIC);
+
+// Rattlesnake accents (shared: static colors, geometry carries the pattern).
+const SNAKE_EYE_MAT = new THREE.MeshLambertMaterial({ color: 0x000000, emissive: 0x000000, emissiveIntensity: 0.3 });
+const SNAKE_TONGUE_MAT = new THREE.MeshLambertMaterial({ color: 0xff3333, transparent: true, opacity: 0.9 });
+
 // Atari 2600 Palette Colors
 const C = {
   LEAF_DARK: '#224818',
@@ -93,7 +150,7 @@ export function createTreeModel(voxelSize = 0.45) {
     }
   });
 
-  const geo = createVoxelGeometry(voxels, voxelSize, false);
+  const geo = cachedVoxelGeo(`tree:${voxelSize}`, voxels, voxelSize, false, 0.14);
   const mesh = new THREE.Mesh(geo, SHARED_MATERIAL);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -125,7 +182,7 @@ export function createLogModel(voxelSize = 0.18, lengthVoxels = 16) {
     }
   }
 
-  const geo = createVoxelGeometry(voxels, voxelSize, true);
+  const geo = cachedVoxelGeo(`log:${voxelSize}:${length}`, voxels, voxelSize, true, 0.12);
   const mesh = new THREE.Mesh(geo, SHARED_MATERIAL);
   return mesh;
 }
@@ -186,13 +243,15 @@ export function createCrocodileModel(voxelSize = 0.32) {
     }
   }
 
-  const baseGeo = createVoxelGeometry(baseVoxels, voxelSize, false);
+  const baseGeo = cachedVoxelGeo(`crocBase:${voxelSize}`, baseVoxels, voxelSize, false, 0.1);
   const baseMesh = new THREE.Mesh(baseGeo, SHARED_MATERIAL);
   group.add(baseMesh);
 
   // 2. Large Prominent Reptilian Eyes (At top of skull: Z = 0, X = ±3.2)
+  // NOTE: eyeMat stays per-instance — its color is animated per crocodile.
   const eyeMat = new THREE.MeshBasicMaterial({ color: 0xf8d820 }); // Calm yellow by default
-  const eyeGeo = new THREE.BoxGeometry(voxelSize * 2.2, voxelSize * 2.0, voxelSize * 2.2);
+  const eyeGeo = memoGeometry(`crocEye:${voxelSize}`,
+    () => new THREE.BoxGeometry(voxelSize * 2.2, voxelSize * 2.0, voxelSize * 2.2));
 
   const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
   leftEye.position.set(-3.2 * voxelSize, 3.2 * voxelSize, 0 * voxelSize);
@@ -203,8 +262,9 @@ export function createCrocodileModel(voxelSize = 0.32) {
   group.add(rightEye);
 
   // Big Pupil slits (black dots on front face of eyes)
-  const pupilMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-  const pupilGeo = new THREE.BoxGeometry(voxelSize * 0.9, voxelSize * 1.6, voxelSize * 0.5);
+  const pupilMat = sharedBasicMaterial(0x000000);
+  const pupilGeo = memoGeometry(`crocPupil:${voxelSize}`,
+    () => new THREE.BoxGeometry(voxelSize * 0.9, voxelSize * 1.6, voxelSize * 0.5));
 
   const leftPupil = new THREE.Mesh(pupilGeo, pupilMat);
   leftPupil.position.set(-3.2 * voxelSize, 3.2 * voxelSize, 1.0 * voxelSize);
@@ -242,7 +302,7 @@ export function createCrocodileModel(voxelSize = 0.32) {
     }
   }
 
-  const upperGeo = createVoxelGeometry(upperVoxels, voxelSize, false);
+  const upperGeo = cachedVoxelGeo(`crocUpper:${voxelSize}`, upperVoxels, voxelSize, false, 0.1);
   const upperMesh = new THREE.Mesh(upperGeo, SHARED_MATERIAL);
   upperJawGroup.add(upperMesh);
   group.add(upperJawGroup);
@@ -281,7 +341,7 @@ export function createVineModel(length = 26, voxelSize = 0.25) {
     voxels.push({ x, y: -length - 1, z: 0, color: C.TRUNK_LIGHT });
   }
 
-  const geo = createVoxelGeometry(voxels, voxelSize, false);
+  const geo = cachedVoxelGeo(`vine:${length}:${voxelSize}`, voxels, voxelSize, false, 0.12);
   const mesh = new THREE.Mesh(geo, SHARED_MATERIAL);
   group.add(mesh);
 
@@ -401,13 +461,14 @@ export function createScorpionModel(voxelSize = 0.28) {
   voxels.push({ x: 0, y: 4, z: -1, color: TOXIC_GOLD });
 
   // Geometry sits exactly at Y = 0 on ground with center='bottom'
-  const scorpGeo = createVoxelGeometry(voxels, voxelSize, 'bottom');
+  const scorpGeo = cachedVoxelGeo(`scorp:${voxelSize}`, voxels, voxelSize, 'bottom', 0.14);
   const scorpMesh = new THREE.Mesh(scorpGeo, SHARED_MATERIAL);
   group.add(scorpMesh);
 
   // 5. Glowing Cyan Eyes (Front of head at Y = 2.4)
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
-  const eyeGeo = new THREE.BoxGeometry(voxelSize * 0.8, voxelSize * 0.8, voxelSize * 0.8);
+  const eyeMat = sharedBasicMaterial(0x00ffff);
+  const eyeGeo = memoGeometry(`scorpEye:${voxelSize}`,
+    () => new THREE.BoxGeometry(voxelSize * 0.8, voxelSize * 0.8, voxelSize * 0.8));
   const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
   leftEye.position.set(-1 * voxelSize, 2.3 * voxelSize, 3.2 * voxelSize);
   group.add(leftEye);
@@ -417,8 +478,9 @@ export function createScorpionModel(voxelSize = 0.28) {
   group.add(rightEye);
 
   // 6. Incandescent Poison Stinger Bulb (Glowing yellow material at Y = 5.5)
-  const stingerGlowMat = new THREE.MeshBasicMaterial({ color: 0xffea00 });
-  const stingerGlowGeo = new THREE.BoxGeometry(voxelSize * 1.6, voxelSize * 1.4, voxelSize * 1.6);
+  const stingerGlowMat = sharedBasicMaterial(0xffea00);
+  const stingerGlowGeo = memoGeometry(`scorpGlow:${voxelSize}`,
+    () => new THREE.BoxGeometry(voxelSize * 1.6, voxelSize * 1.4, voxelSize * 1.6));
   const stingerGlowMesh = new THREE.Mesh(stingerGlowGeo, stingerGlowMat);
   stingerGlowMesh.position.set(0, 5.5 * voxelSize, -3.0 * voxelSize);
   group.add(stingerGlowMesh);
@@ -508,13 +570,13 @@ export function createBrickWallModel(voxelSize = 0.25, mortarSize = 0.25) {
   buildWallSection(brickVoxels, 0, W, H, D, 0, 4, 2);
 
   const group = new THREE.Group();
-  const mortarGeo = createVoxelGeometry(mortarVoxels, ms, false);
+  const mortarGeo = cachedVoxelGeo(`wallMortar:${ms}`, mortarVoxels, ms, false);
   const mortarMesh = new THREE.Mesh(mortarGeo, SHARED_MATERIAL);
   // Seat the thin layer just behind the brick faces (half-cube recess).
   mortarMesh.position.z = D * s - ms * 1.5;
   group.add(mortarMesh);
 
-  const brickGeo = createVoxelGeometry(brickVoxels, s, false);
+  const brickGeo = cachedVoxelGeo(`wallBrick:${s}`, brickVoxels, s, false, 0.1);
   const brickMesh = new THREE.Mesh(brickGeo, SHARED_MATERIAL);
   // Bricks stand slightly proud of the backing so the thinner mortar reads as
   // recessed joints. Kept small so the 1m collision band in player.js still fits.
@@ -593,7 +655,7 @@ export function createCampfireModel(voxelSize = 0.22) {
   addLog(-2, 1, 4, 2, 3, -3);
   addLog(2, 1, 4, -2, 3, -3);
 
-  const baseGeo = createVoxelGeometry(baseVoxels, voxelSize, 'bottom');
+  const baseGeo = cachedVoxelGeo(`fireBase:${voxelSize}`, baseVoxels, voxelSize, 'bottom', 0.12);
   const baseMesh = new THREE.Mesh(baseGeo, SHARED_MATERIAL);
   group.add(baseMesh);
 
@@ -614,8 +676,8 @@ export function createCampfireModel(voxelSize = 0.22) {
     { x: 0, y: 4, z: 0, color: '#ffe600' },
     { x: 0, y: 5, z: 0, color: '#ffaa00' },
   ];
-  const coreGeo = createVoxelGeometry(coreVoxels, voxelSize * 1.1, 'bottom');
-  const coreMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const coreGeo = cachedVoxelGeo(`fireCore:${voxelSize}`, coreVoxels, voxelSize * 1.1, 'bottom', 0.16);
+  const coreMat = VERTEX_BASIC;
   const coreMesh = new THREE.Mesh(coreGeo, coreMat);
   coreMesh.position.set(0, 0.22, 0);
   group.add(coreMesh);
@@ -636,8 +698,8 @@ export function createCampfireModel(voxelSize = 0.22) {
     { x: 0, y: 7, z: 0, color: '#cc0000' },
     { x: 0, y: 8, z: 0, color: '#990000' },
   ];
-  const mainFlameGeo = createVoxelGeometry(mainFlameVoxels, voxelSize, 'bottom');
-  const mainFlameMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const mainFlameGeo = cachedVoxelGeo(`fireMain:${voxelSize}`, mainFlameVoxels, voxelSize, 'bottom', 0.16);
+  const mainFlameMat = VERTEX_BASIC;
   const mainFlame = new THREE.Mesh(mainFlameGeo, mainFlameMat);
   mainFlame.position.set(0, 0.22, 0);
   group.add(mainFlame);
@@ -651,7 +713,7 @@ export function createCampfireModel(voxelSize = 0.22) {
     { x: -1, y: 4, z: 0, color: '#e61100' },
     { x: 0, y: 5, z: 0, color: '#cc0000' },
   ];
-  const sideFlameGeo1 = createVoxelGeometry(sideFlameVoxels1, voxelSize * 0.9, 'bottom');
+  const sideFlameGeo1 = cachedVoxelGeo(`fireSide1:${voxelSize}`, sideFlameVoxels1, voxelSize * 0.9, 'bottom', 0.16);
   const sideFlame1 = new THREE.Mesh(sideFlameGeo1, mainFlameMat);
   sideFlame1.position.set(-0.35, 0.20, 0.2);
   group.add(sideFlame1);
@@ -665,7 +727,7 @@ export function createCampfireModel(voxelSize = 0.22) {
     { x: 1, y: 4, z: 0, color: '#e61100' },
     { x: 0, y: 5, z: 0, color: '#cc0000' },
   ];
-  const sideFlameGeo2 = createVoxelGeometry(sideFlameVoxels2, voxelSize * 0.9, 'bottom');
+  const sideFlameGeo2 = cachedVoxelGeo(`fireSide2:${voxelSize}`, sideFlameVoxels2, voxelSize * 0.9, 'bottom', 0.16);
   const sideFlame2 = new THREE.Mesh(sideFlameGeo2, mainFlameMat);
   sideFlame2.position.set(0.35, 0.20, -0.2);
   group.add(sideFlame2);
@@ -673,11 +735,11 @@ export function createCampfireModel(voxelSize = 0.22) {
   // 5. Floating Ascending Voxel Sparks / Embers
   const emberCount = 8;
   const embers = [];
-  const emberMatYellow = new THREE.MeshBasicMaterial({ color: 0xffe033 });
-  const emberMatOrange = new THREE.MeshBasicMaterial({ color: 0xff6600 });
-  const emberMatRed = new THREE.MeshBasicMaterial({ color: 0xff2200 });
-  const emberGeo = new THREE.BoxGeometry(voxelSize * 0.45, voxelSize * 0.45, voxelSize * 0.45);
-
+  const emberGeo = memoGeometry(`fireEmber:${voxelSize}`,
+    () => new THREE.BoxGeometry(voxelSize * 0.45, voxelSize * 0.45, voxelSize * 0.45));
+  const emberMatYellow = sharedBasicMaterial(0xffe033);
+  const emberMatOrange = sharedBasicMaterial(0xff6600);
+  const emberMatRed = sharedBasicMaterial(0xff2200);
   for (let i = 0; i < emberCount; i++) {
     const mat = i % 3 === 0 ? emberMatYellow : (i % 3 === 1 ? emberMatOrange : emberMatRed);
     const emberMesh = new THREE.Mesh(emberGeo, mat);
@@ -711,13 +773,14 @@ export function createCampfireModel(voxelSize = 0.22) {
 }
 
 /**
- * Creates a naturalistic rattlesnake (voxel style) with organic coiled body,
- * tapered head, distinct rattle, and animated tongue.
- * - Organic S-curved coils with rounded profiles
- * - Diamond-patterned back using alternating voxel colors
- * - Tapered triangular head with yellow eyes and forked tongue
- * - Segmented rattle at tail
- * - Separated into body, head, and tongue for animation.
+ * Creates the authentic Pitfall cobra (obj 7), modeled directly on the ROM
+ * sprites Cobra0/Cobra1 (pitfall.asm): a fat near-vertical body rising from the
+ * ground with WHITE bands separated by dark rows, a black diamond head with
+ * grey eyes, and a forked red tongue that flicks (Cobra0 -> Cobra1 animation).
+ * Geometry spans roughly [-1..3] x [-1..3] in voxel X and Y = 0..13, so the
+ * whole model stands ~2.9m tall at the default voxelSize of 0.22 — towering
+ * over the trail like the original sprite (14 px of 32).
+ * Returns { mesh, head, tongue } for the world's idle-sway animation hooks.
  */
 export function createSnakeModel(voxelSize = 0.22) {
   const group = new THREE.Group();
@@ -875,11 +938,11 @@ export function createSnakeModel(voxelSize = 0.22) {
   }
 
   // Build meshes
-  const bodyGeo = createVoxelGeometry(bodyVoxels, voxelSize, 'bottom');
+  const bodyGeo = cachedVoxelGeo(`snakeBody:${voxelSize}`, bodyVoxels, voxelSize, 'bottom', 0.14);
   const bodyMesh = new THREE.Mesh(bodyGeo, SHARED_MATERIAL);
   group.add(bodyMesh);
 
-  const rattleGeo = createVoxelGeometry(rattleVoxels, voxelSize, 'bottom');
+  const rattleGeo = cachedVoxelGeo(`snakeRattle:${voxelSize}`, rattleVoxels, voxelSize, 'bottom', 0.14);
   const rattleMesh = new THREE.Mesh(rattleGeo, SHARED_MATERIAL);
   group.add(rattleMesh);
 
@@ -887,13 +950,14 @@ export function createSnakeModel(voxelSize = 0.22) {
   const headGroup = new THREE.Group();
   headGroup.position.set(0, (headBaseY + 0.5) * voxelSize, 5.5 * voxelSize);
 
-  const headGeo = createVoxelGeometry(headVoxels, voxelSize, false);
+  const headGeo = cachedVoxelGeo(`snakeHead:${voxelSize}`, headVoxels, voxelSize, false, 0.14);
   const headMesh = new THREE.Mesh(headGeo, SHARED_MATERIAL);
   headGroup.add(headMesh);
 
   // Yellow eyes (spherical, on sides of head)
-  const eyeGeo = new THREE.SphereGeometry(voxelSize * 0.35, 8, 8);
-  const eyeMat = new THREE.MeshLambertMaterial({ color: colEye, emissive: colEye, emissiveIntensity: 0.3 });
+  const eyeGeo = memoGeometry(`snakeEye:${voxelSize}`,
+    () => new THREE.SphereGeometry(voxelSize * 0.35, 12, 10));
+  const eyeMat = SNAKE_EYE_MAT;
   
   const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
   leftEye.position.set(-voxelSize * 1.2, voxelSize * 0.3, voxelSize * 2.5);
@@ -907,8 +971,9 @@ export function createSnakeModel(voxelSize = 0.22) {
   const tongueGroup = new THREE.Group();
   tongueGroup.position.set(0, -voxelSize * 0.2, voxelSize * 3.5);
   
-  const tongueGeo = new THREE.BoxGeometry(voxelSize * 0.15, voxelSize * 0.1, voxelSize * 1.8);
-  const tongueMat = new THREE.MeshLambertMaterial({ color: colTongue, transparent: true, opacity: 0.9 });
+  const tongueGeo = memoGeometry(`snakeTongue:${voxelSize}`,
+    () => new THREE.BoxGeometry(voxelSize * 0.15, voxelSize * 0.1, voxelSize * 1.8));
+  const tongueMat = SNAKE_TONGUE_MAT;
   
   // Left fork
   const tongueLeft = new THREE.Mesh(tongueGeo, tongueMat);
@@ -923,7 +988,8 @@ export function createSnakeModel(voxelSize = 0.22) {
   tongueGroup.add(tongueRight);
   
   // Tongue base
-  const tongueBaseGeo = new THREE.BoxGeometry(voxelSize * 0.5, voxelSize * 0.1, voxelSize * 0.6);
+  const tongueBaseGeo = memoGeometry(`snakeTongueBase:${voxelSize}`,
+    () => new THREE.BoxGeometry(voxelSize * 0.5, voxelSize * 0.1, voxelSize * 0.6));
   const tongueBase = new THREE.Mesh(tongueBaseGeo, tongueMat);
   tongueBase.position.set(0, 0, -voxelSize * 0.3);
   tongueGroup.add(tongueBase);
@@ -1007,8 +1073,8 @@ export function createTreasureModel(type = 'gold', voxelSize = 0.22) {
     }
   }
 
-  const geo = createVoxelGeometry(voxels, voxelSize, 'bottom');
-  const mat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const geo = cachedVoxelGeo(`treasure:${type}:${voxelSize}`, voxels, voxelSize, 'bottom', 0.12);
+  const mat = VERTEX_BASIC;
   const mesh = new THREE.Mesh(geo, mat);
 
   return { mesh, points, type };
@@ -1046,7 +1112,7 @@ export function createPlayerArmsModel() {
     const thumbX = isLeft ? 2 : -2;
     voxels.push({ x: thumbX, y: -2, z: 0, color: C.HARRY_SKIN });
 
-    const geo = createVoxelGeometry(voxels, 0.08, true);
+    const geo = memoGeometry('arms', () => createVoxelGeometry(voxels, 0.08, true));
     const mesh = new THREE.Mesh(geo, SHARED_MATERIAL);
     armGroup.add(mesh);
     return armGroup;
@@ -1121,7 +1187,7 @@ export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12) 
     }
   }
 
-  const pitGeo = createVoxelGeometry(pitVoxels, voxelSize, false);
+  const pitGeo = cachedVoxelGeo(`quickPit:${voxelSize}`, pitVoxels, voxelSize, false);
   const pitMesh = new THREE.Mesh(pitGeo, SHARED_MATERIAL);
   pitMesh.position.set(baseOffset, 0, baseOffset);
   group.add(pitMesh);
@@ -1165,8 +1231,14 @@ export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12) 
       }
     }
 
-    const leftMesh = new THREE.Mesh(createVoxelGeometry(leftVoxels, voxelSize, false), SHARED_MATERIAL);
-    const rightMesh = new THREE.Mesh(createVoxelGeometry(rightVoxels, voxelSize, false), SHARED_MATERIAL);
+    const leftMesh = new THREE.Mesh(
+      cachedVoxelGeo(`quickSeg:${voxelSize}:${numSegments}:L${s}`, leftVoxels, voxelSize, false),
+      SHARED_MATERIAL
+    );
+    const rightMesh = new THREE.Mesh(
+      cachedVoxelGeo(`quickSeg:${voxelSize}:${numSegments}:R${s}`, rightVoxels, voxelSize, false),
+      SHARED_MATERIAL
+    );
     leftMesh.position.set(baseOffset, 0, baseOffset);
     rightMesh.position.set(baseOffset, 0, baseOffset);
     leftMesh.receiveShadow = true;

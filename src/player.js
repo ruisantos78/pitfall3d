@@ -915,6 +915,9 @@ export class Player {
           treasure.collected = true;
           // The treasure belongs to the screen group, not directly to the scene.
           treasure.mesh.removeFromParent();
+          // Authentic treasureBits: mark the (phase, kind) slot as claimed so it
+          // never respawns on revisits (world.resetRun() clears it on restart).
+          world.claimTreasureSlot(treasure);
           this.score += treasure.points;
           this.treasuresCollected++;
           audio.playTreasure();

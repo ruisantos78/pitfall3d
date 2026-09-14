@@ -10,7 +10,8 @@ import {
   createTreasureModel,
   createOpeningQuicksandModel,
   createBrickWallModel,
-  createSnakeModel
+  isSharedModelGeometry,
+  isSharedModelMaterial
 } from './models.js';
 import { createVoxelGeometry, createVoxelMaterial } from './voxel.js';
 import { audio } from './audio.js';
@@ -35,6 +36,7 @@ export class World {
     this.torchTime = 0;
     this.activeOpeningPits = [];
     this.activeTunnelWalls = []; // brick dead-ends (authentic bit-7 wall logic)
+    this.collectedTreasureSlots = new Set(); // authentic treasureBits: once per run
 
     // Fixed pool of PointLights (constant count => shaders compile once and
     // never again on screen crossings). Per-frame the nearest light emitters
@@ -50,6 +52,12 @@ export class World {
     // { screenIndex, color, distance, intensity, getPos(Vector3)->Vector3 }
     this.lightEmitters = [];
     this._poolVec = new THREE.Vector3();
+
+    // Shared world-structure geometry/material cache: boxes reused on every
+    // screen (borders, flags, tunnel walls, ladder rungs, spikes, pond water)
+    // are built once and registered as shared — screen cleanup never disposes
+    // them and repeated builds stop allocating.
+    this.worldGeoCache = new Map();
 
     // Log shatter debris (shared unit cube + 3 wood materials: no per-burst
     // allocation, nothing to dispose on screen removal).
@@ -67,6 +75,16 @@ export class World {
       opacity: 0.85,
     });
     this.pitMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+    // Underground materials — declared BEFORE shared-resource registration so
+    // they are protected from disposal (they were previously referenced before
+    // definition, silently skipped by the `if (m)` guard and disposed on every
+    // screen cleanup, forcing constant shader recompiles).
+    this.tunnelWallMaterial = new THREE.MeshLambertMaterial({ color: 0x4a3826 });
+    this.tunnelFloorMaterial = new THREE.MeshLambertMaterial({ color: 0x5a4128 });
+    this.caveCeilMaterial = new THREE.MeshLambertMaterial({ color: 0x2e2418 });
+    this.ladderMaterial = new THREE.MeshLambertMaterial({ color: 0x8a6a3a });
+    this.spikeMaterial = new THREE.MeshLambertMaterial({ color: 0x9aa0a8 });
 
     // Shared tree template for cloning
     this.treeTemplate = createTreeModel(0.5);
@@ -96,13 +114,28 @@ export class World {
       this.ladderMaterial, this.spikeMaterial]) {
       if (m) this.sharedMaterials.add(m);
     }
+  }
 
-    // Underground: dirt for tunnel walls and wood for the ladder
-    this.tunnelWallMaterial = new THREE.MeshLambertMaterial({ color: 0x4a3826 });
-    this.tunnelFloorMaterial = new THREE.MeshLambertMaterial({ color: 0x5a4128 });
-    this.caveCeilMaterial = new THREE.MeshLambertMaterial({ color: 0x2e2418 });
-    this.ladderMaterial = new THREE.MeshLambertMaterial({ color: 0x8a6a3a });
-    this.spikeMaterial = new THREE.MeshLambertMaterial({ color: 0x9aa0a8 });
+  // Cached geometry shared across all screens (auto-registered as protected).
+  sharedGeo(key, build) {
+    let geo = this.worldGeoCache.get(key);
+    if (!geo) {
+      geo = build();
+      this.worldGeoCache.set(key, geo);
+      this.sharedGeometries.add(geo);
+    }
+    return geo;
+  }
+
+  // Cached material shared across all screens (auto-registered as protected).
+  sharedMat(key, build) {
+    let mat = this.worldGeoCache.get(key);
+    if (!mat) {
+      mat = build();
+      this.worldGeoCache.set(key, mat);
+      this.sharedMaterials.add(mat);
+    }
+    return mat;
   }
 
   // Generate or get screen at index (0, 1, 2, ...)
@@ -158,10 +191,11 @@ export class World {
   disposeScreenGroup(group) {
     group.traverse((o) => {
       if (o.isMesh) {
-        if (o.geometry && !this.sharedGeometries.has(o.geometry)) o.geometry.dispose();
+        if (o.geometry && !this.sharedGeometries.has(o.geometry) &&
+          !isSharedModelGeometry(o.geometry)) o.geometry.dispose();
         const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
         for (const m of mats) {
-          if (!this.sharedMaterials.has(m)) m.dispose();
+          if (!this.sharedMaterials.has(m) && !isSharedModelMaterial(m)) m.dispose();
         }
         // Textures are all shared (hazard stripe), never disposed here.
       }
@@ -231,14 +265,47 @@ export class World {
 
   // Screen N = LFSR stepped (N mod 255) times right from seed $C4.
   // Only 255 phases exist: phase 256 wraps back to phase 1 (seamless forward loop).
-  getAuthenticSpec(index) {
-    const n = ((index % 255) + 255) % 255;
+  // All 255 phases are precomputed once (O(1) lookups, zero per-build stepping).
+  static LFSR_TABLE = (() => {
+    const table = [];
     let r = 0xc4;
-    for (let i = 0; i < n; i++) r = World.lfsrRight(r);
-    const objectType = r & 0x07;
-    const sceneType = (r >> 3) & 0x07;
-    const treePat = (r >> 6) & 0x03;
-    return { rand: r, objectType, sceneType, treePat };
+    for (let i = 0; i < 255; i++) {
+      const objectType = r & 0x07;
+      const sceneType = (r >> 3) & 0x07;
+      table.push({
+        rand: r,
+        objectType,
+        sceneType,
+        treePat: (r >> 6) & 0x03,
+        // Authentic treasure slot (pitfall.asm CheckTreasures): one of 32
+        // unique slots per run, tracked with 4 bytes of treasureBits.
+        // The 6502 does `rol; rol; rol; and #3` through carry, which reduces
+        // exactly to (r >> 6) & 3 (= treePat) — verified against a cycle-exact
+        // emulation of the instruction sequence.
+        treasureSlot: ((r >> 6) & 3) * 8 + objectType,
+      });
+      r = World.lfsrRight(r);
+    }
+    return table;
+  })();
+
+  getAuthenticSpec(index) {
+    return World.LFSR_TABLE[((index % 255) + 255) % 255];
+  }
+
+  // Treasures already claimed this run, keyed "<phase255>:<objectType>"
+  // (pitfall.asm treasureBits: a collected treasure never reappears).
+  static treasureKey(index) {
+    const phase = ((index % 255) + 255) % 255;
+    return `${phase}:${World.LFSR_TABLE[phase].objectType}`;
+  }
+
+  claimTreasureSlot(treasure) {
+    if (treasure && treasure.slotKey) this.collectedTreasureSlots.add(treasure.slotKey);
+  }
+
+  resetRun() {
+    this.collectedTreasureSlots.clear();
   }
 
   // Deterministic Pitfall 2600 screen sequence (hybrid authentic+)
@@ -352,8 +419,8 @@ export class World {
     }
 
     // Lateral green grass borders beneath trees
-    const borderGeo = new THREE.BoxGeometry(16, 1, length);
-    const borderMat = new THREE.MeshLambertMaterial({ color: 0x224e18, flatShading: true });
+    const borderGeo = this.sharedGeo('border', () => new THREE.BoxGeometry(16, 1, length));
+    const borderMat = this.sharedMat('borderMat', () => new THREE.MeshLambertMaterial({ color: 0x224e18, flatShading: true }));
 
     // Top joints flush with the ground strip (which goes to ±4.5): no coplanar
     // overlap (avoids z-fighting) on either side.
@@ -371,6 +438,12 @@ export class World {
     const spec = this.getAuthenticSpec(index) || { rand: 0, objectType: 4, sceneType: 0, treePat: 0 };
     const obj = spec.objectType;
     const scene = spec.sceneType;
+    // Authentic ground-object depth: xPosObject = 124 of 160 px (pitfall.asm
+    // ContRandom) — past the far edge of any central pit, on solid ground.
+    const objZ = startZ - SCREEN_LENGTH * (124 / 160);
+    // Authentic treasure kinds (scene 5 only): objectType & 3 selects the
+    // sprite — money bag, silver bar, gold bar, diamond ring — worth exactly
+    // 2000/3000/4000/5000 BCD points (matches models.js `points`).
     const treasureKinds = ['money', 'silver', 'gold', 'diamond'];
     // Authentic brick dead-end (pitfall.asm ContRandom): on ladder scenes
     // (0/1) bit 7 picks the wall side — 17/160 (left) or 136/160 (right).
@@ -380,12 +453,11 @@ export class World {
 
     // Overlay ground object — surface map only (pitfall.asm bits 0..2).
     // Underground (tunnel + scorpion) for scenes 0-1 is built separately.
-    // obj 7 = surface snake: no model yet, so nothing spawns
-    // (the scorpion lives in the tunnel).
+    // obj 7 = cobra (surface snake), spawned by addOverlayObject below.
     // Rolling logs: fixed, deterministic drop points on solid ground
     // (never inside lakes/pits), no randomness.
     const addOverlayObject = (z) => {
-      if (scene === 5) return; // treasure handled with quicksand below
+      if (scene === 5) return; // objectType IS the treasure kind on scene 5 (handled below)
       if (obj <= 3) {
         const count = [1, 2, 2, 3][obj];
         for (let i = 0; i < count; i++) {
@@ -400,7 +472,9 @@ export class World {
       } else if (obj === 6) {
         this.addCampfire(group, index, z);
       } else if (obj === 7) {
-        this.addCampfire(group, index, z);
+        // obj 7 = cobra in the original (CheckTreasures/Color1PtrTab). Rendered
+        // as the 3D rattlesnake — same hazard role, same kill box as the fire.
+        this.addSnake(group, index, z);
       }
     }
 
@@ -412,7 +486,7 @@ export class World {
         this.addCaveCeiling(group, startZ, endZ, [{ centerZ: midZ, half: 2 }]);
         // Authentic brick dead-end in the tunnel below (bit-7 side).
         this.addTunnelWall(group, index, tunnelWallZ);
-        addOverlayObject(midZ + 14);
+        addOverlayObject(objZ);
         break;
 
       case 'HOLE_TRIPLE':
@@ -423,44 +497,43 @@ export class World {
         this.addCaveCeiling(group, startZ, endZ, [12, 0, -12].map((off) => ({ centerZ: midZ + off, half: 1.5 })));
         // Authentic brick dead-end in the tunnel below (bit-7 side).
         this.addTunnelWall(group, index, tunnelWallZ);
-        addOverlayObject(midZ + 20);
+        addOverlayObject(objZ);
         break;
 
       case 'DISAPPEARING_QUICKSAND': {
-        // Original scene 5: black quicksand + treasure (obj&3 selects which).
-        const kind = treasureKinds[obj & 3];
-        this.addOpeningQuicksandPit(group, index, midZ);
-        this.addTreasure(group, index, midZ - 12, kind);
+        // Original scene 5 — THE ONLY treasure scene (pitfall.asm: treasures
+        // spawn exclusively on sceneType 5). Kind = objectType & 3, worth
+        // 2000/3000/4000/5000. Each (phase, kind) slot exists once per run,
+        // exactly like the ROM's 32 treasureBits — claimed slots spawn nothing.
+        const slotKey = World.treasureKey(index);
+        if (!this.collectedTreasureSlots.has(slotKey)) {
+          this.addOpeningQuicksandPit(group, index, midZ);
+          this.addTreasure(group, index, objZ, treasureKinds[obj & 3], slotKey);
+        } else {
+          // Pit still renders on revisits — only the treasure is gone.
+          this.addOpeningQuicksandPit(group, index, midZ);
+        }
         break;
       }
 
       case 'BLUE_QUICKSAND':
-        // Original scene 7: blue quicksand, no vine (surfable like black).
+        // Original scene 7: blue quicksand, no vine, NO treasure.
         this.addOpeningQuicksandPit(group, index, midZ);
-        // Overlay base at +20 (not +14): with two fixed logs (obj 5 at +25/+15)
-        // both fit BEFORE the 20m pit (entry edge at midZ+10).
-        addOverlayObject(midZ + 20);
-        this.addTreasure(group, index, midZ - 14, 'silver');
+        addOverlayObject(objZ);
         break;
 
       case 'QUICKSAND_VINE':
-        // Original scene 3: blue swamp + vine.
+        // Original scene 3: blue swamp + vine, NO treasure.
         this.addWaterPond(group, index, midZ, 20);
         this.addVine(group, index, midZ);
-        // Overlay base at +20 (not +14): with two fixed logs (obj 5 at +25/+15)
-        // both fit BEFORE the 20m pit (entry edge at midZ+10).
-        addOverlayObject(midZ + 20);
-        this.addTreasure(group, index, midZ - 14, 'gold');
+        addOverlayObject(objZ);
         break;
 
       case 'TAR_PIT_VINE':
-        // Original scene 2: black pit + vine.
+        // Original scene 2: black tar pit + vine, NO treasure.
         this.addTarPit(group, index, midZ, 20);
         this.addVine(group, index, midZ);
-        // Overlay base at +20 (not +14): with two fixed logs (obj 5 at +25/+15)
-        // both fit BEFORE the 20m pit (entry edge at midZ+10).
-        addOverlayObject(midZ + 20);
-        this.addTreasure(group, index, midZ - 14, 'diamond');
+        addOverlayObject(objZ);
         break;
 
       case 'CROCODILE_VINE': {
@@ -479,13 +552,10 @@ export class World {
       }
 
       case 'QUICKSAND_VINE_OPEN':
-        // Original scene 6: black quicksand + vine.
+        // Original scene 6: black quicksand + vine, NO treasure.
         this.addOpeningQuicksandPit(group, index, midZ);
         this.addVine(group, index, midZ);
-        // Overlay base at +20 (not +14): with two fixed logs (obj 5 at +25/+15)
-        // both fit BEFORE the 20m pit (entry edge at midZ+10).
-        addOverlayObject(midZ + 20);
-        this.addTreasure(group, index, midZ - 14, 'gold');
+        addOverlayObject(objZ);
         break;
 
       default:
@@ -691,10 +761,10 @@ export class World {
   // left at end) so they don't overlap at borders, with the cloth always facing
   // inward (towards the track, away from the trees).
   addBoundaryFlags(group, startZ, endZ) {
-    const poleGeo = new THREE.BoxGeometry(0.14, 2.6, 0.14);
-    const flagGeo = new THREE.BoxGeometry(0.95, 0.55, 0.08);
-    const poleMat = new THREE.MeshLambertMaterial({ color: 0xf0e0c0 });
-    const flagMat = new THREE.MeshLambertMaterial({ color: 0xff3020 });
+    const poleGeo = this.sharedGeo('flagPole', () => new THREE.BoxGeometry(0.14, 2.6, 0.14));
+    const flagGeo = this.sharedGeo('flagCloth', () => new THREE.BoxGeometry(0.95, 0.55, 0.08));
+    const poleMat = this.sharedMat('flagPoleMat', () => new THREE.MeshLambertMaterial({ color: 0xf0e0c0 }));
+    const flagMat = this.sharedMat('flagClothMat', () => new THREE.MeshLambertMaterial({ color: 0xff3020 }));
     for (const [x, z] of [[5.0, startZ - 1], [-5.0, endZ + 1]]) {
       const flag = new THREE.Group();
       const pole = new THREE.Mesh(poleGeo, poleMat);
@@ -724,12 +794,12 @@ export class World {
     // (including the green edges). The log falls in and drops back from the sky
     // at its single spawn point.
     const pitWidth = PATH_WIDTH + 1;
-    const pitGeo = new THREE.BoxGeometry(pitWidth, 0.2, length);
+    const pitGeo = this.sharedGeo('logExitPit', () => new THREE.BoxGeometry(pitWidth, 0.2, length));
     const pitMesh = new THREE.Mesh(pitGeo, this.pitMaterial);
     pitMesh.position.set(0, -0.6, centerZ);
     group.add(pitMesh);
     // Spikes at the bottom: make it clear this area is not to be entered.
-    const spikeGeo = new THREE.ConeGeometry(0.32, 2.0, 6);
+    const spikeGeo = this.sharedGeo('spike', () => new THREE.ConeGeometry(0.32, 2.0, 6));
     for (let x = -4; x <= 4; x += 1) {
       const spike = new THREE.Mesh(spikeGeo, this.spikeMaterial);
       spike.position.set(x, -1.0, centerZ); // tips at 0.0, at the mouth of the pit
@@ -763,13 +833,13 @@ export class World {
     // Siding in the ceiling colour closes the gap between the track floor (bottom -1)
     // and the cave ceiling (top -3) around the hole.
     const holeLen = half * 2 + 1;
-    const bandSideGeo = new THREE.BoxGeometry(0.3, 2, holeLen + 0.6);
+    const bandSideGeo = this.sharedGeo(`shaftBandSide:${half}`, () => new THREE.BoxGeometry(0.3, 2, holeLen + 0.6));
     for (const x of [-2.65, 2.65]) {
       const band = new THREE.Mesh(bandSideGeo, this.caveCeilMaterial);
       band.position.set(x, -2.0, centerZ);
       group.add(band);
     }
-    const bandEndGeo = new THREE.BoxGeometry(5.6, 2, 0.3);
+    const bandEndGeo = this.sharedGeo('shaftBandEnd', () => new THREE.BoxGeometry(5.6, 2, 0.3));
     for (const z of [centerZ - half - 0.65, centerZ + half + 0.65]) {
       const band = new THREE.Mesh(bandEndGeo, this.caveCeilMaterial);
       band.position.set(0, -2.0, z);
@@ -782,8 +852,8 @@ export class World {
     // going forward (-Z), south side coming back (+Z).
     let ladder = null;
     if (hasLadder) {
-      const railGeo = new THREE.BoxGeometry(0.12, 5.5, 0.12);
-      const rungGeo = new THREE.BoxGeometry(1.0, 0.09, 0.09);
+      const railGeo = this.sharedGeo('ladderRail', () => new THREE.BoxGeometry(0.12, 5.5, 0.12));
+      const rungGeo = this.sharedGeo('ladderRung', () => new THREE.BoxGeometry(1.0, 0.09, 0.09));
       ladder = new THREE.Group();
       ladder.position.set(0, 0, centerZ - half + 0.45); // north wall by default
       for (const x of [-0.5, 0.5]) {
@@ -827,7 +897,7 @@ export class World {
     const closeSeg = (hi) => {
       if (hi - cur >= 0.3) {
         const seg = new THREE.Mesh(
-          new THREE.BoxGeometry(PATH_WIDTH + 1, 0.5, hi - cur),
+          this.sharedGeo(`ceilSeg:${hi - cur}`, () => new THREE.BoxGeometry(PATH_WIDTH + 1, 0.5, hi - cur)),
           this.caveCeilMaterial
         );
         seg.position.set(0, -3.25, (cur + hi) / 2);
@@ -849,13 +919,13 @@ export class World {
     const length = SCREEN_LENGTH;
 
     const floor = new THREE.Mesh(
-      new THREE.BoxGeometry(PATH_WIDTH + 1, 0.5, length),
+      this.sharedGeo('tunnelFloor', () => new THREE.BoxGeometry(PATH_WIDTH + 1, 0.5, length)),
       this.tunnelFloorMaterial
     );
     floor.position.set(0, TUNNEL_FLOOR_Y - 0.25, midZ);
     group.add(floor);
 
-    const sideGeo = new THREE.BoxGeometry(0.5, 7.5, length);
+    const sideGeo = this.sharedGeo('tunnelSide', () => new THREE.BoxGeometry(0.5, 7.5, length));
     for (const x of [-4.75, 4.75]) {
       const wall = new THREE.Mesh(sideGeo, this.tunnelWallMaterial);
       wall.position.set(x, TUNNEL_FLOOR_Y + 3, midZ);
@@ -874,14 +944,14 @@ export class World {
 
     // Tunnel torches marking underground checkpoints (alternate sides like the
     // surface flags; brazier only, no dedicated light of their own).
-    const bracketGeo = new THREE.BoxGeometry(0.16, 0.16, 0.5);
-    const stickGeo = new THREE.BoxGeometry(0.12, 0.9, 0.12);
-    const flameGeo = new THREE.ConeGeometry(0.2, 0.55, 6);
-    const emberGeo = new THREE.ConeGeometry(0.1, 0.3, 6);
-    const bracketMat = new THREE.MeshLambertMaterial({ color: 0x2a2018 });
-    const stickMat = new THREE.MeshLambertMaterial({ color: 0x6a4a28 });
-    const flameMat = new THREE.MeshBasicMaterial({ color: 0xff7018 });
-    const emberMat = new THREE.MeshBasicMaterial({ color: 0xffd23f });
+    const bracketGeo = this.sharedGeo('torchBracket', () => new THREE.BoxGeometry(0.16, 0.16, 0.5));
+    const stickGeo = this.sharedGeo('torchStick', () => new THREE.BoxGeometry(0.12, 0.9, 0.12));
+    const flameGeo = this.sharedGeo('torchFlame', () => new THREE.ConeGeometry(0.2, 0.55, 6));
+    const emberGeo = this.sharedGeo('torchEmber', () => new THREE.ConeGeometry(0.1, 0.3, 6));
+    const bracketMat = this.sharedMat('torchBracketMat', () => new THREE.MeshLambertMaterial({ color: 0x2a2018 }));
+    const stickMat = this.sharedMat('torchStickMat', () => new THREE.MeshLambertMaterial({ color: 0x6a4a28 }));
+    const flameMat = this.sharedMat('torchFlameMat', () => new THREE.MeshBasicMaterial({ color: 0xff7018 }));
+    const emberMat = this.sharedMat('torchEmberMat', () => new THREE.MeshBasicMaterial({ color: 0xffd23f }));
     for (const [x, z] of [[4.3, startZ - 2], [-4.3, endZ + 2]]) {
       const torch = new THREE.Group();
       const bracket = new THREE.Mesh(bracketGeo, bracketMat);
@@ -919,7 +989,7 @@ export class World {
 
   addTarPit(group, screenIndex, centerZ, length = 20) {
     // Keep the tar visible as a solid black rectangle instead of exposing an empty shaft.
-    const pitGeo = new THREE.BoxGeometry(PATH_WIDTH, 0.3, length);
+    const pitGeo = this.sharedGeo('pondTar', () => new THREE.BoxGeometry(PATH_WIDTH, 0.3, length));
     const pitMesh = new THREE.Mesh(pitGeo, this.pitMaterial);
     pitMesh.position.set(0, -0.6, centerZ);
     group.add(pitMesh);
@@ -984,7 +1054,7 @@ export class World {
   }
 
   addWaterPond(group, screenIndex, centerZ, length = 20) {
-    const waterGeo = new THREE.BoxGeometry(PATH_WIDTH, 0.3, length);
+    const waterGeo = this.sharedGeo('pondWater', () => new THREE.BoxGeometry(PATH_WIDTH, 0.3, length));
     const waterMesh = new THREE.Mesh(waterGeo, this.waterMaterial);
     waterMesh.position.set(0, -0.6, centerZ);
     group.add(waterMesh);
@@ -1038,23 +1108,9 @@ export class World {
   }
 
   addSnake(group, screenIndex, z) {
-    const snake = createSnakeModel(0.28);
-    snake.mesh.position.set(0, 0, z);
-    
-    // Slight random rotation for variety
-    snake.mesh.rotation.y = (Math.random() - 0.5) * 0.5;
-
-    group.add(snake.mesh);
-    this.activeHazards.push({
-      type: 'snake',
-      z,
-      minZ: z - 1.5,
-      maxZ: z + 1.5,
-      mesh: snake.mesh,
-      head: snake.head,
-      tongue: snake.tongue,
-      timer: Math.random() * Math.PI * 2, // Desync animations
-    });
+    // TEMPORARY: the reworked snake model was shelved; the original campfire
+    // stands in for object 7 (cobra) until a new model is approved.
+    this.addCampfire(group, screenIndex, z);
   }
 
   addCampfire(group, screenIndex, z) {
@@ -1121,7 +1177,7 @@ export class World {
     hazard.emitter = venomEmitter;
   }
 
-  addTreasure(group, screenIndex, z, type = 'gold') {
+  addTreasure(group, screenIndex, z, type = 'gold', slotKey = null) {
     const treasure = createTreasureModel(type, 0.22);
     // The diamond ring is lifted slightly so the golden band doesn't look sunken into the ground
     const liftY = type === 'diamond' ? 0.3 : 0.05;
@@ -1134,6 +1190,7 @@ export class World {
       points: treasure.points,
       type: treasure.type,
       z: z,
+      slotKey,
       collected: false,
     });
   }

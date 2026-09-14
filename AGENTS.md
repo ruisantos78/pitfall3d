@@ -233,6 +233,8 @@ To help with debugging models and screen generation without constantly dying, th
 
 ## 💡 Important Tips for Future Agents
 
+- **Map/treasure authority:** `docs/AUTHENTIC_MAP_SPEC.md` is the binding reference for screen generation from `assets/pitfall.asm` — treasures exist ONLY on sceneType 5 (kind = `objectType & 3`, worth 2000/3000/4000/5000), ground objects sit at 124/160 of the screen depth, and each of the 32 `(phase, kind)` treasure slots can be collected once per run (`World.collectedTreasureSlots`, reset by `world.resetRun()`).
+- **Shared GPU resources:** model geometries are memoized in `models.js` (`memoGeometry`/`cachedVoxelGeo` + `isSharedModelGeometry`/`isSharedModelMaterial`) and per-screen boxes reuse `World.sharedGeo`/`sharedMat` — never call `geometry.dispose()` on those, and never create fresh `BoxGeometry`/materials inside per-screen builders.
 - **Always verify the build with `npm run build`** after changing JavaScript files.
 - **Don't change HUD message orientation**: remember the player runs forward (direction `-Z`). Any tip about approaching the crocodile's eyes must say to move **forward**, never backward.
 - **Keep user-facing texts bilingual**: the game supports PT/EN via `src/i18n.js` — never hardcode user-visible strings; add a dictionary key in both languages instead.

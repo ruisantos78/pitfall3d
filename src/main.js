@@ -282,6 +282,8 @@ class Game {
       this.world.removeScreenEntities(screen);
     }
     this.world.screens.clear();
+    // Authentic treasureBits reset (InitGame): collected treasures return on a new run.
+    this.world.resetRun();
     this.world.updateVisibleScreens(0);
   }
 
