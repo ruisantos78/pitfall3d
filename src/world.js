@@ -1149,6 +1149,12 @@ export class World {
       }
     }
 
+    // Directional hearing: positional hazard sounds (croc snaps, quicksand)
+    // only play for hazards ahead of the player in the facing direction
+    // (2m tolerance so sounds underfoot still play).
+    const facingDir = northFacing ? -1 : 1;
+    const isAhead = (hz) => (hz - playerZ) * facingDir > -2.0;
+
     // 1. Update Swinging Vines
     this.activeVines.forEach(v => {
       v.time += delta * v.vine.speed;
@@ -1170,8 +1176,8 @@ export class World {
         if (c.croc.eyeMaterial) c.croc.eyeMaterial.color.setHex(0xf8d820); // Calm Yellow eyes
 
         if (c.wasOpen) {
-          // Just snapped shut! Play safety sound
-          audio.playCrocSnap();
+          // Just snapped shut! Safety sound only if the croc is ahead.
+          if (isAhead(c.z)) audio.playCrocSnap();
           c.wasOpen = false;
         }
       } else if (cycleTime < 2.8) {
@@ -1396,15 +1402,15 @@ export class World {
       }
       p.phase = phase;
 
-      // Global cycle transition sounds
+      // Global cycle transition sounds (only if the pit is ahead)
       if (phase === 'opening') {
-        if (!p.rumblePlayed) {
+        if (!p.rumblePlayed && isAhead(p.z)) {
           audio.playQuicksandRumble();
           p.rumblePlayed = true;
         }
       } else if (phase === 'closed') {
         if (p.wasOpen) {
-          audio.playGroundThud();
+          if (isAhead(p.z)) audio.playGroundThud();
           p.wasOpen = false;
           p.rumblePlayed = false;
         }

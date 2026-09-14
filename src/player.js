@@ -888,12 +888,18 @@ export class Player {
       bobY = Math.sin(this.bobTimer) * 0.05;
       bobPitch = Math.sin(this.bobTimer) * 0.015;
 
-      // Subtle footstep sound
-      if (Math.sin(this.bobTimer) < -0.95 && Math.random() < 0.15) {
+      // Footstep on every stride (each zero crossing of the bob cycle).
+      const bobSin = Math.sin(this.bobTimer);
+      if (
+        this.lastBobSin !== undefined &&
+        ((this.lastBobSin >= 0 && bobSin < 0) || (this.lastBobSin < 0 && bobSin >= 0))
+      ) {
         audio.playStep();
       }
+      this.lastBobSin = bobSin;
     } else {
       this.bobTimer = 0;
+      this.lastBobSin = 0;
     }
 
     // Camera position & rotation (slight natural tilt towards the trail ahead)
@@ -1065,8 +1071,9 @@ export class Player {
     // Drop from the sky like the original: spawns high up and gravity does the rest.
     this.y = this.RESPAWN_DROP_HEIGHT;
     this.respawnDrop = true;
-    this.targetRotY = 0;
-    this.camera.rotation.y = 0;
+    // Keep the facing direction from before death (no forced turn-around).
+    if (this.targetRotY === undefined) this.targetRotY = 0;
+    this.camera.rotation.y = this.targetRotY;
     this.camera.position.set(0, this.y + EYE_HEIGHT, this.z);
   }
 

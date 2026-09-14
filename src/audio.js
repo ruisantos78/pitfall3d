@@ -254,7 +254,8 @@ class RetroAudio {
     osc.stop(now + 0.12);
   }
 
-  // Footstep tap
+  // Footstep tap (triangle 160→70Hz carries on small speakers;
+  // pure low sine was inaudible outside headphones)
   playStep() {
     if (!this.enabled) return;
     this.init();
@@ -263,18 +264,18 @@ class RetroAudio {
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
 
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(90, now);
-    osc.frequency.exponentialRampToValueAtTime(40, now + 0.04);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(160, now);
+    osc.frequency.exponentialRampToValueAtTime(70, now + 0.06);
 
-    gain.gain.setValueAtTime(0.08, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+    gain.gain.setValueAtTime(0.4, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
 
     osc.connect(gain);
     gain.connect(this.ctx.destination);
 
     osc.start(now);
-    osc.stop(now + 0.04);
+    osc.stop(now + 0.06);
   }
 
   // Release vine whoosh
