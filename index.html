@@ -76,8 +76,10 @@
             <span class="blink" data-i18n="vine.grabbed">AGARRADO AO CIPO! [ESPAÇO] PARA SOLTAR</span>
           </div>
 
-          <div class="hud-box croc-status" id="croc-prompt">
-            <span id="croc-status-text" data-i18n="hint.mouthClosed">🐊 BOCA FECHADA! PULE NOS OLHOS OU NA CABEÇA!</span>
+          <div id="rear-log-prompt" style="display: none; flex: 1 1 100%; padding: 6px 0;">
+            <div style="width: 50%; height: 20px; margin: 0 auto; border-left: 2px solid rgba(248, 216, 32, 0.5); border-right: 2px solid rgba(248, 216, 32, 0.5); padding: 2px; box-sizing: border-box;">
+              <div id="rear-log-bar" style="width: 10%; height: 100%; margin: 0 auto; background: repeating-linear-gradient(-45deg, #f8d820, #f8d820 10px, #141414 10px, #141414 20px); border-radius: 2px; box-shadow: 0 0 6px #f8d820; transition: width 0.1s linear;"></div>
+            </div>
           </div>
 
           <div class="hud-box treasures-box">
@@ -130,7 +132,6 @@
                   <button id="btn-lang-en" class="retro-btn lang-btn" type="button">🇺🇸 EN</button>
                 </div>
               </div>
-              <button id="btn-help" class="retro-btn" data-i18n-title="opt.helpTitle" title="Exibir ou ocultar mensagens de ajuda"><span class="btn-ico">💡</span><span class="btn-txt"> AJUDA NA TELA: LIGADA</span></button>
               <button id="btn-sound" class="retro-btn" data-i18n-title="opt.soundTitle" title="Alternar Som"><span class="btn-ico">🔊</span><span class="btn-txt"> SOM: LIGADO</span></button>
               <button id="btn-crt" class="retro-btn" data-i18n-title="opt.crtTitle" title="Alternar Filtro CRT"><span class="btn-ico">📺</span><span class="btn-txt"> CRT: ON</span></button>
               <button id="btn-fullscreen" class="retro-btn" data-i18n-title="opt.fullscreenTitle" title="Alternar tela cheia"><span class="btn-ico">⛶</span><span class="btn-txt"> TELA CHEIA: OFF</span></button>

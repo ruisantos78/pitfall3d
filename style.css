@@ -186,6 +186,11 @@ body {
   letter-spacing: 1px;
 }
 
+#croc-status-text {
+  display: block;
+  width: 100%;
+}
+
 .croc-status.safe {
   display: block;
   background: rgba(20, 140, 30, 0.9);

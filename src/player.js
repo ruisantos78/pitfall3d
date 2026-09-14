@@ -4,9 +4,7 @@ import { audio } from './audio.js';
 import { SCREEN_LENGTH, TUNNEL_FLOOR_Y, CEIL_TOP_Y } from './world.js';
 import { createPlayerArmsModel } from './models/index.js';
 import { t, getHighScore, getShowHelp, submitScore } from './i18n.js';
-
-// DEBUG GOD MODE: Enables infinite lives and bypasses hazard kill boxes (croc, snake, fire, scorpions, logs).
-export const DEBUG_GOD_MODE = false;
+import { DEBUG_GOD_MODE } from './main.js';
 
 export const GRAVITY = 28.0;
 export const JUMP_VELOCITY = 10.5;

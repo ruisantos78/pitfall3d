@@ -222,7 +222,7 @@ make preview      # runs 'npm run preview'
 ## 🐛 Debugging & God Mode
 
 To help with debugging models and screen generation without constantly dying, the codebase supports a temporary **God Mode**.
-- **Location:** In `src/player.js`, set `export const DEBUG_GOD_MODE = true;`.
+- **Location:** In `src/main.js`, set `export const DEBUG_GOD_MODE = true;`.
 - **Effect:** 
   - The player becomes immune to surface hazards (crocodiles, snakes, fires, scorpions).
   - The player will not trip on logs.

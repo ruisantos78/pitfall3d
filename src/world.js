@@ -314,10 +314,11 @@ export class World {
   // Deterministic Pitfall 2600 screen sequence (hybrid authentic+)
   getScreenType(index) {
     const spec = this.getAuthenticSpec(index);
-    // Scene 4 (crocodiles): half with a vine, half croc-only (decided by LFSR treePat —
-    // deterministic, the map never changes between sessions).
+    // Scene 4 (crocodiles): decided by bits 0-2 (objectType).
+    // If bits 0-2 are 010(2), 011(3), 110(6), or 111(7), there is a vine.
+    // This is equivalent to checking if bit 1 (value 2) is set.
     if (spec.sceneType === 4) {
-      return spec.treePat % 2 === 1 ? 'CROCODILE_VINE' : 'CROCODILE_POND';
+      return (spec.objectType & 2) !== 0 ? 'CROCODILE_VINE' : 'CROCODILE_POND';
     }
     const base = [
       'HOLE_SINGLE',            // 0: one hole + ladder/wall underground
@@ -609,44 +610,37 @@ export class World {
     return tex;
   }
 
-  // Ground warning marker for where the log will land: striped disc +
-  // pulsing red ring, clearly visible from a distance so the player can brake in time.
+  // Ground warning marker for where the log will land: an expanding 
+  // striped warning band (zebra tape) starting from the center.
   createFallingLogWarning(z) {
     const group = new THREE.Group();
     if (!this.hazardStripeTex) {
       this.hazardStripeTex = this.makeHazardStripeTexture();
     }
-    const discMat = new THREE.MeshBasicMaterial({
-      map: this.hazardStripeTex,
-      transparent: true,
-      opacity: 0.75,
-      depthWrite: false,
-    });
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(1.9, 24), discMat);
-    disc.rotation.x = -Math.PI / 2;
-    disc.position.y = 0.02;
-    group.add(disc);
-
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xff2200,
+    // Clone texture per marker so we can adjust repeat independently
+    const tex = this.hazardStripeTex.clone();
+    tex.needsUpdate = true;
+    
+    const bandMat = new THREE.MeshBasicMaterial({
+      map: tex,
       transparent: true,
       opacity: 0.8,
       depthWrite: false,
-      side: THREE.DoubleSide,
     });
-    const ring = new THREE.Mesh(new THREE.RingGeometry(1.9, 2.3, 24), ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.03;
-    group.add(ring);
+    // Base size 1m wide, 1.8m deep. Scaled dynamically on X.
+    const band = new THREE.Mesh(new THREE.PlaneGeometry(1, 1.8), bandMat);
+    band.rotation.x = -Math.PI / 2;
+    band.position.y = 0.02;
+    group.add(band);
 
     group.position.set(0, 0, z);
-    return { group, disc, ring, discMat, ringMat };
+    return { group, band, bandMat, tex };
   }
 
-  // Exact cycle for one log: sky drop (~0.88s) + rolling 52m at 6.5m/s
-  // (8.0s) + pit fall (~0.91s) ≈ 9.8s. Because geometry is identical every screen,
+  // Exact cycle for one log: sky drop (~0.88s) + rolling 50.5m at 9.0m/s
+  // (~5.61s) + pit fall (~0.91s) ≈ 7.4s. Because geometry is identical every screen,
   // the cycle is constant and the staggered timing never drifts.
-  static ROLLING_CYCLE = 9.8;
+  static ROLLING_CYCLE = 7.4;
 
   addRollingLog(group, screenIndex, startZ, endZ, idx, count) {
     // Wide log covering the yellow track plus half of each green edge
@@ -673,10 +667,9 @@ export class World {
       group, // debris spawns into the same screen group
       mesh: log,
       landingShadow: alert.group,
-      alertDisc: alert.disc,
-      alertRing: alert.ring,
-      alertDiscMat: alert.discMat,
-      alertRingMat: alert.ringMat,
+      band: alert.band,
+      bandMat: alert.bandMat,
+      tex: alert.tex,
       z: dropZ,
       spawnZ: dropZ, // single return point — no Math.random
       y: spawnY,
@@ -692,7 +685,7 @@ export class World {
       startZ,
       endZ,
       exitPitZ: startZ - 1.5, // center of the spike exit pit
-      speed: 6.5, // units/sec towards player (+Z direction)
+      speed: 9.0, // units/sec towards player (+Z direction) (matches RUN_SPEED)
       radius: 1.2,
     };
 
@@ -1316,18 +1309,19 @@ export class World {
           0,
           1,
         );
-        // Pulsing warning marker: grows as the log approaches + flashes red.
-        const pulse = (Math.sin(performance.now() * 0.012) + 1) / 2;
-        const warnScale = 0.3 + fallProgress * 0.85;
+        // Expanding striped band: grows horizontally as the log approaches.
+        const bandWidth = Math.max(0.01, fallProgress * 9.5); // Up to 9.5m wide
         l.landingShadow.visible = true;
         l.landingShadow.position.z = l.z;
-        l.landingShadow.scale.set(warnScale, 1, warnScale);
-        if (l.alertDiscMat) l.alertDiscMat.opacity = 0.55 + fallProgress * 0.3;
-        if (l.alertRingMat) l.alertRingMat.opacity = 0.45 + pulse * 0.5;
-        if (l.alertDisc) l.alertDisc.rotation.z += delta * 1.5;
-        if (l.alertRing) {
-          const ringPulse = 1 + pulse * 0.12;
-          l.alertRing.scale.set(ringPulse, ringPulse, 1);
+        if (l.band) {
+          l.band.scale.set(bandWidth, 1, 1);
+        }
+        if (l.tex) {
+          // Scale the texture horizontally so the stripes don't stretch
+          l.tex.repeat.set(bandWidth / 1.5, 1);
+        }
+        if (l.bandMat) {
+          l.bandMat.opacity = 0.4 + fallProgress * 0.5;
         }
         if (l.y <= l.groundY) {
           l.y = l.groundY;

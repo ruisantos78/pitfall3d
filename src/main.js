@@ -7,6 +7,9 @@ import { Player } from './player.js';
 import { HUD } from './hud.js';
 import { t, getLanguage, setLanguage, getShowHelp, setShowHelp, getHighScore, applyStaticTexts } from './i18n.js';
 
+// DEBUG GOD MODE: Enables infinite lives and bypasses hazard kill boxes (croc, snake, fire, scorpions, logs).
+export const DEBUG_GOD_MODE = true;
+
 class Game {
   constructor() {
     this.canvas = document.getElementById('webgl-canvas');
