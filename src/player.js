@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { audio } from './audio.js';
 import { SCREEN_LENGTH, TUNNEL_FLOOR_Y, CEIL_TOP_Y } from './world.js';
-import { createPlayerArmsModel } from './models.js';
+import { createPlayerArmsModel } from './models/index.js';
 import { t, getHighScore, getShowHelp, submitScore } from './i18n.js';
 
 // DEBUG GOD MODE: Enables infinite lives and bypasses hazard kill boxes (croc, snake, fire, scorpions, logs).
@@ -893,6 +893,14 @@ export class Player {
           this.die('death.fire');
           return;
         }
+      } else if (hazard.type === 'snake') {
+        if (DEBUG_GOD_MODE) continue;
+        const distZ = Math.abs(this.z - hazard.z);
+        if (distZ < 1.1 && Math.abs(this.y) < 0.9) {
+          audio.playTrip();
+          this.die('death.snake');
+          return;
+        }
       } else if (hazard.type === 'scorpion') {
         if (DEBUG_GOD_MODE) continue;
         // Scorpion: deadly if touching without jumping (same level only)
@@ -1085,7 +1093,7 @@ export class Player {
       if (Math.abs(hy) > 3) continue;
       if (hazard.type === 'rolling_log') {
         if (Math.abs(z - hazard.z) < 4.0) return false;
-      } else if (hazard.type === 'log' || hazard.type === 'fire' || hazard.type === 'scorpion') {
+      } else if (hazard.type === 'log' || hazard.type === 'fire' || hazard.type === 'scorpion' || hazard.type === 'snake') {
         if (Math.abs(z - hazard.z) < 2.8) return false;
       }
     }

@@ -10,9 +10,10 @@ import {
   createTreasureModel,
   createOpeningQuicksandModel,
   createBrickWallModel,
+  createSnakeModel,
   isSharedModelGeometry,
   isSharedModelMaterial
-} from './models.js';
+} from './models/index.js';
 import { createVoxelGeometry, createVoxelMaterial } from './voxel.js';
 import { audio } from './audio.js';
 
@@ -33,6 +34,7 @@ export class World {
     this.activeHazards = [];
     this.animatedCampfires = [];
     this.animatedTorches = [];
+    this.animatedSnakes = [];
     this.torchTime = 0;
     this.activeOpeningPits = [];
     this.activeTunnelWalls = []; // brick dead-ends (authentic bit-7 wall logic)
@@ -212,6 +214,7 @@ export class World {
     this.activeHazards = this.activeHazards.filter(h => h.screenIndex !== screen.index);
     this.animatedCampfires = this.animatedCampfires.filter(c => c.screenIndex !== screen.index);
     this.animatedTorches = this.animatedTorches.filter(t => t.screenIndex !== screen.index);
+    this.animatedSnakes = this.animatedSnakes.filter(s => s.screenIndex !== screen.index);
     this.activeOpeningPits = this.activeOpeningPits.filter(p => p.screenIndex !== screen.index);
     this.activeTunnelWalls = this.activeTunnelWalls.filter(wl => wl.screenIndex !== screen.index);
     this.logDebris = this.logDebris.filter(d => d.screenIndex !== screen.index);
@@ -1108,9 +1111,25 @@ export class World {
   }
 
   addSnake(group, screenIndex, z) {
-    // TEMPORARY: the reworked snake model was shelved; the original campfire
-    // stands in for object 7 (cobra) until a new model is approved.
-    this.addCampfire(group, screenIndex, z);
+    const snake = createSnakeModel(0.12); // Made even smaller
+    snake.group.position.set(0, 0, z);
+    
+    // Slight random rotation for variety (facing generally forward)
+    snake.group.rotation.y = (Math.random() - 0.5) * 0.4;
+    group.add(snake.group);
+
+    this.animatedSnakes.push({
+      screenIndex,
+      snake,
+      time: Math.random() * Math.PI * 2
+    });
+
+    this.activeHazards.push({
+      type: 'snake',
+      screenIndex,
+      z: z,
+      radius: 1.4, // Same killbox radius as fire
+    });
   }
 
   addCampfire(group, screenIndex, z) {
@@ -1384,6 +1403,25 @@ export class World {
     this.animatedTorches.forEach(t => {
       t.emitter.intensity = 6 + Math.sin(this.torchTime * 13 + t.seed) * 1.3 +
         Math.sin(this.torchTime * 29 + t.seed * 2) * 0.7;
+    });
+
+    // Update Animated Snakes
+    this.animatedSnakes.forEach(s => {
+      s.time += delta;
+      
+      // Tongue waving up and down like a fan
+      // Only flap when a burst is active, otherwise resting
+      const burst = Math.sin(s.time * 5);
+      if (burst > 0.4) {
+        // Fast flapping motion based on time
+        s.snake.tongue.rotation.x = Math.sin(s.time * 30) * 0.4;
+      } else {
+        // Resting position
+        s.snake.tongue.rotation.x = 0;
+      }
+
+      // Tail waving side to side
+      s.snake.tail.rotation.y = Math.sin(s.time * 8) * 0.4;
     });
 
     // 4. Update Animated Campfires (Core, multi-tongue flames, rising embers, flickering light)
