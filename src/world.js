@@ -1017,15 +1017,15 @@ export class World {
       phase: 'closed', // closed | opening | open | closing (fills edges→middle)
       wasOpen: false,
       rumblePlayed: false,
-      // Cycle (seconds): closed-solid pause (0.5s) → sinking spreads
-      // middle→edges (1.8s) → fully open (5.0s) → filling converges
-      // edges→middle (1.8s, ~5.6 m/s per side: slower than Harry's 9.0,
-      // so pace the closing front to cross).
-      // Total: 9.1s, open for most of the cycle.
-      closedDur: 0.5,
-      openingDur: 1.8,
+      // Cycle (seconds):      // timer for the cycle
+      // Original cycle timing (~9.9s):
+      // closed-solid pause (1.5s) → sinking spreads middle→edges (1.1s)
+      // → fully open (5.0s) → filling converges edges→middle (1.1s,
+      // faster than 9.0m/s so Harry can perfectly pace the closing front).
+      closedDur: 1.5,
+      openingDur: 1.1,
       openDur: 5.0,
-      closingDur: 1.8,
+      closingDur: 1.1,
     };
 
     this.activeOpeningPits.push(pitData);
@@ -1489,10 +1489,10 @@ export class World {
     });
 
     // 7. Update Disappearing Quicksand Pits (per-section cycle)
-    // Phases: closed-solid pause (0.5s) → sinking spreads middle→edges
-    // (2.2s) → fully open (5.0s) → filling converges edges→middle
-    // (2.2s, pace the closing front to cross).
-    // Total: 9.9s. Each section splits in half (X) and sinks (Y).
+    // Phases: closed-solid pause (1.5s) → sinking spreads middle→edges
+    // (1.1s) → fully open (5.0s) → filling converges edges→middle
+    // (1.1s, faster than 9.0m/s so Harry can perfectly pace the closing front).
+    // Total: 8.7s. Each section splits in half (X) and sinks (Y).
     this.activeOpeningPits.forEach(p => {
       p.timer += delta;
       const n = p.numSegments;
