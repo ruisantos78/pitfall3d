@@ -12,7 +12,7 @@ export const RUN_SPEED = 9.0;
 export const EYE_HEIGHT = 2.2;
 // Underground shortcut pace: Harry runs 2x faster in hazardous tunnel screens (jumping
 // stays enabled — it is the only way past scorpions).
-export const TUNNEL_SPEED_MULT = 1.0;
+export const TUNNEL_SPEED_MULT = 2.0;
 // Empty underground screens have no ladder or scorpion to negotiate, so Harry
 // can sprint through them at the faster transit pace.
 export const EMPTY_TUNNEL_SPEED_MULT = 4.0;
@@ -432,7 +432,7 @@ export class Player {
     // 0 = face -Z (dir = -1), Math.PI = face +Z (dir = 1)
     const dir = this.targetRotY === Math.PI ? 1 : -1;
     // Underground shortcut pace: hazardous/ladder screens use 2x, while an
-    // empty screen uses 3x to shorten the safe transit sections.
+    // empty screen uses 4x to shorten the safe transit sections.
     let paceMultiplier = 1;
     if (this.inTunnel) {
       const tunnelScreen = Math.floor(-this.z / SCREEN_LENGTH);

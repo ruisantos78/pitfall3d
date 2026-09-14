@@ -76,7 +76,7 @@ pitfall/
 #### [`src/player.js`](file:///home/ruisantos/Projects/pitfall/src/player.js)
 - **Physics Constants:**
   - `RUN_SPEED = 9.0` (walk speed forward/backward)
-  - `TUNNEL_SPEED_MULT = 1.0` (underground shortcut pace when stairs or scorpions are present)
+  - `TUNNEL_SPEED_MULT = 2.0` (underground shortcut pace when stairs or scorpions are present)
   - `EMPTY_TUNNEL_SPEED_MULT = 4.0` (safe empty tunnel transit pace)
   - `JUMP_VELOCITY = 10.5`, `GRAVITY = 28.0` (air time ~0.75s, max running jump range = 6.75m)
   - `EYE_HEIGHT = 2.2` (Harry's first-person eye height)
