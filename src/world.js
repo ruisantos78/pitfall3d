@@ -18,8 +18,8 @@ import { audio } from './audio.js';
 
 export const SCREEN_LENGTH = 60; // Length of each screen along Z axis
 export const PATH_WIDTH = 8;     // Width of corridor
-export const TUNNEL_FLOOR_Y = -8; // Underground tunnel floor (ladder screens)
-export const CEIL_TOP_Y = -3; // Cave ceiling top (landing on it is hit kill)
+export const TUNNEL_FLOOR_Y = -12; // Underground tunnel floor (ladder screens)
+export const CEIL_TOP_Y = -7; // Cave ceiling top (landing on it is hit kill)
 
 export class World {
   constructor(scene) {
@@ -756,25 +756,23 @@ export class World {
     }
   }
 
-  // Boundary flags at the start and end of each screen: visual border markers
-  // and checkpoints (respawn returns here). Alternates sides (right at start,
-  // left at end) so they don't overlap at borders, with the cloth always facing
-  // inward (towards the track, away from the trees).
   addBoundaryFlags(group, startZ, endZ) {
     const poleGeo = this.sharedGeo('flagPole', () => new THREE.BoxGeometry(0.14, 2.6, 0.14));
     const flagGeo = this.sharedGeo('flagCloth', () => new THREE.BoxGeometry(0.95, 0.55, 0.08));
     const poleMat = this.sharedMat('flagPoleMat', () => new THREE.MeshLambertMaterial({ color: 0xf0e0c0 }));
     const flagMat = this.sharedMat('flagClothMat', () => new THREE.MeshLambertMaterial({ color: 0xff3020 }));
-    for (const [x, z] of [[5.0, startZ - 1], [-5.0, endZ + 1]]) {
-      const flag = new THREE.Group();
-      const pole = new THREE.Mesh(poleGeo, poleMat);
-      pole.position.y = 1.3;
-      flag.add(pole);
-      const cloth = new THREE.Mesh(flagGeo, flagMat);
-      cloth.position.set(x > 0 ? -0.55 : 0.55, 2.25, 0);
-      flag.add(cloth);
-      flag.position.set(x, 0, z);
-      group.add(flag);
+    for (const z of [startZ - 1]) {
+      for (const x of [5.0, -5.0]) {
+        const flag = new THREE.Group();
+        const pole = new THREE.Mesh(poleGeo, poleMat);
+        pole.position.y = 1.3;
+        flag.add(pole);
+        const cloth = new THREE.Mesh(flagGeo, flagMat);
+        cloth.position.set(x > 0 ? -0.55 : 0.55, 2.25, 0);
+        flag.add(cloth);
+        flag.position.set(x, 0, z);
+        group.add(flag);
+      }
     }
   }
 
@@ -831,18 +829,18 @@ export class World {
   addLadderShaft(group, screenIndex, centerZ, half, hasLadder = true) {
     // No surrounding walls — just the wooden ladder hanging in the gap.
     // Siding in the ceiling colour closes the gap between the track floor (bottom -1)
-    // and the cave ceiling (top -3) around the hole.
+    // and the cave ceiling (top -7) around the hole.
     const holeLen = half * 2 + 1;
-    const bandSideGeo = this.sharedGeo(`shaftBandSide:${half}`, () => new THREE.BoxGeometry(0.3, 2, holeLen + 0.6));
+    const bandSideGeo = this.sharedGeo(`shaftBandSide:${half}`, () => new THREE.BoxGeometry(0.3, 6, holeLen + 0.6));
     for (const x of [-2.65, 2.65]) {
       const band = new THREE.Mesh(bandSideGeo, this.caveCeilMaterial);
-      band.position.set(x, -2.0, centerZ);
+      band.position.set(x, -4.0, centerZ);
       group.add(band);
     }
-    const bandEndGeo = this.sharedGeo('shaftBandEnd', () => new THREE.BoxGeometry(5.6, 2, 0.3));
+    const bandEndGeo = this.sharedGeo('shaftBandEnd', () => new THREE.BoxGeometry(5.6, 6, 0.3));
     for (const z of [centerZ - half - 0.65, centerZ + half + 0.65]) {
       const band = new THREE.Mesh(bandEndGeo, this.caveCeilMaterial);
-      band.position.set(0, -2.0, z);
+      band.position.set(0, -4.0, z);
       group.add(band);
     }
 
@@ -852,13 +850,13 @@ export class World {
     // going forward (-Z), south side coming back (+Z).
     let ladder = null;
     if (hasLadder) {
-      const railGeo = this.sharedGeo('ladderRail', () => new THREE.BoxGeometry(0.12, 5.5, 0.12));
+      const railGeo = this.sharedGeo('ladderRail', () => new THREE.BoxGeometry(0.12, 9.5, 0.12));
       const rungGeo = this.sharedGeo('ladderRung', () => new THREE.BoxGeometry(1.0, 0.09, 0.09));
       ladder = new THREE.Group();
       ladder.position.set(0, 0, centerZ - half + 0.45); // north wall by default
       for (const x of [-0.5, 0.5]) {
         const rail = new THREE.Mesh(railGeo, this.ladderMaterial);
-        rail.position.set(x, -3.0, 0);
+        rail.position.set(x, -5.0, 0);
         ladder.add(rail);
       }
       for (let y = -0.5; y >= TUNNEL_FLOOR_Y + 2.2; y -= 0.8) {
@@ -900,7 +898,7 @@ export class World {
           this.sharedGeo(`ceilSeg:${hi - cur}`, () => new THREE.BoxGeometry(PATH_WIDTH + 1, 0.5, hi - cur)),
           this.caveCeilMaterial
         );
-        seg.position.set(0, -3.25, (cur + hi) / 2);
+        seg.position.set(0, CEIL_TOP_Y - 0.25, (cur + hi) / 2);
         group.add(seg);
       }
       cur = hi;
@@ -914,7 +912,7 @@ export class World {
 
   // Tunnel stretch (floor, side walls and light) — every screen has its own,
   // forming the continuous seamless corridor. Ceiling goes in `addCaveCeiling`.
-  addTunnel(group, screenIndex, startZ, endZ, floorY = -8) {
+  addTunnel(group, screenIndex, startZ, endZ, floorY = TUNNEL_FLOOR_Y) {
     const midZ = (startZ + endZ) / 2;
     const length = SCREEN_LENGTH;
 
@@ -952,38 +950,40 @@ export class World {
     const stickMat = this.sharedMat('torchStickMat', () => new THREE.MeshLambertMaterial({ color: 0x6a4a28 }));
     const flameMat = this.sharedMat('torchFlameMat', () => new THREE.MeshBasicMaterial({ color: 0xff7018 }));
     const emberMat = this.sharedMat('torchEmberMat', () => new THREE.MeshBasicMaterial({ color: 0xffd23f }));
-    for (const [x, z] of [[4.3, startZ - 2], [-4.3, endZ + 2]]) {
-      const torch = new THREE.Group();
-      const bracket = new THREE.Mesh(bracketGeo, bracketMat);
-      bracket.rotation.y = Math.PI / 2;
-      torch.add(bracket);
-      const stick = new THREE.Mesh(stickGeo, stickMat);
-      stick.position.y = 0.4;
-      stick.rotation.z = x > 0 ? -0.15 : 0.15;
-      torch.add(stick);
-      const flame = new THREE.Mesh(flameGeo, flameMat);
-      flame.position.y = 1.05;
-      torch.add(flame);
-      const ember = new THREE.Mesh(emberGeo, emberMat);
-      ember.position.y = 1.0;
-      torch.add(ember);
-      const glowPos = new THREE.Vector3(x, TUNNEL_FLOOR_Y + 2.5 + 1.1, z);
-      torch.position.set(x, TUNNEL_FLOOR_Y + 2.5, z);
-      group.add(torch);
-      const torchEmitter = {
-        screenIndex,
-        underground: true, // only assigned to a pool slot while the player is down there
-        color: 0xff8030,
-        distance: 11,
-        intensity: 6,
-        getPos: (v) => v.copy(glowPos),
-      };
-      this.lightEmitters.push(torchEmitter);
-      this.animatedTorches.push({
-        screenIndex,
-        emitter: torchEmitter,
-        seed: Math.random() * 10,
-      });
+    for (const z of [startZ - 2]) {
+      for (const x of [4.3, -4.3]) {
+        const torch = new THREE.Group();
+        const bracket = new THREE.Mesh(bracketGeo, bracketMat);
+        bracket.rotation.y = Math.PI / 2;
+        torch.add(bracket);
+        const stick = new THREE.Mesh(stickGeo, stickMat);
+        stick.position.y = 0.4;
+        stick.rotation.z = x > 0 ? -0.15 : 0.15;
+        torch.add(stick);
+        const flame = new THREE.Mesh(flameGeo, flameMat);
+        flame.position.y = 1.05;
+        torch.add(flame);
+        const ember = new THREE.Mesh(emberGeo, emberMat);
+        ember.position.y = 1.0;
+        torch.add(ember);
+        const glowPos = new THREE.Vector3(x, TUNNEL_FLOOR_Y + 2.5 + 1.1, z);
+        torch.position.set(x, TUNNEL_FLOOR_Y + 2.5, z);
+        group.add(torch);
+        const torchEmitter = {
+          screenIndex,
+          underground: true, // only assigned to a pool slot while the player is down there
+          color: 0xff8030,
+          distance: 11,
+          intensity: 6,
+          getPos: (v) => v.copy(glowPos),
+        };
+        this.lightEmitters.push(torchEmitter);
+        this.animatedTorches.push({
+          screenIndex,
+          emitter: torchEmitter,
+          seed: Math.random() * 10,
+        });
+      }
     }
   }
 

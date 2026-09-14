@@ -608,9 +608,9 @@ export class Player {
       // In the tunnel on screens... (continuous tunnel; outside it would be free fall)
       if (this.inTunnel) return TUNNEL_FLOOR_Y;
     }
-    // Falling below the rim (y < -2.5): the cave ceiling slab is solid at -3,
+    // Falling below the rim (y < -2.5): the cave ceiling slab is solid at CEIL_TOP_Y,
     // except at the pit holes (there keep falling down to the tunnel).
-    if (!this.inTunnel && !this.climbing && this.y < -2.5 && this.y > -7.5) {
+    if (!this.inTunnel && !this.climbing && this.y < -2.5 && this.y > TUNNEL_FLOOR_Y + 0.5) {
       const overShaft = this.getLadderShaftAt(world, z, 0) || this.getDropShaftAt(world, z);
       if (overShaft) return TUNNEL_FLOOR_Y;
       // Death reason depends on where it fell: lake/tar/quicksand = abyss

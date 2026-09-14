@@ -1112,7 +1112,7 @@ export function createPlayerArmsModel() {
     const thumbX = isLeft ? 2 : -2;
     voxels.push({ x: thumbX, y: -2, z: 0, color: C.HARRY_SKIN });
 
-    const geo = memoGeometry('arms', () => createVoxelGeometry(voxels, 0.08, true));
+    const geo = memoGeometry(isLeft ? 'armLeft' : 'armRight', () => createVoxelGeometry(voxels, 0.08, true));
     const mesh = new THREE.Mesh(geo, SHARED_MATERIAL);
     armGroup.add(mesh);
     return armGroup;
