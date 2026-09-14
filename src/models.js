@@ -492,28 +492,26 @@ export function createBrickWallModel(voxelSize = 0.25, mortarSize = 0.25) {
   const D = Math.max(2, Math.round(WALL_SPAN_D / s));
   const MW = Math.max(1, Math.round(WALL_SPAN_W / ms));
   const MH = Math.max(1, Math.round(WALL_SPAN_H / ms));
-  const MD = Math.max(1, Math.round(WALL_SPAN_D / ms));
 
-  // Mortar backing: solid recessed slab seen only through the thin joints.
+  // Mortar: a single thin layer at the front, seen only through the joints.
+  // (A full-depth slab turned the back of the wall into a flat white face.)
   const mortarVoxels = [];
   for (let y = 0; y < MH; y++) {
     for (let x = 0; x < MW; x++) {
-      for (let z = 0; z < MD; z++) {
-        mortarVoxels.push({ x, y, z, color: WALL_MORTAR_COLOR });
-      }
+      mortarVoxels.push({ x, y, z: 0, color: WALL_MORTAR_COLOR });
     }
   }
 
-  // Full-width brick shell (front layers), gaps at the joints expose the
-  // recessed mortar backing.
+  // Bricks span the full 1m depth, so the back of the wall reads as brick,
+  // not mortar. Joint gaps run through and meet the thin mortar up front.
   const brickVoxels = [];
-  const BD = Math.min(2, D); // brick shell depth (front layers)
-  const z0 = D - BD;
-  buildWallSection(brickVoxels, 0, W, H, BD, z0, 4, 2);
+  buildWallSection(brickVoxels, 0, W, H, D, 0, 4, 2);
 
   const group = new THREE.Group();
   const mortarGeo = createVoxelGeometry(mortarVoxels, ms, false);
   const mortarMesh = new THREE.Mesh(mortarGeo, SHARED_MATERIAL);
+  // Seat the thin layer just behind the brick faces (half-cube recess).
+  mortarMesh.position.z = D * s - ms * 1.5;
   group.add(mortarMesh);
 
   const brickGeo = createVoxelGeometry(brickVoxels, s, false);

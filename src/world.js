@@ -125,7 +125,7 @@ export class World {
     // the next screen while the player is still mid-screen.
     const missing = [];
     for (let i = currentScreenIndex - 1; i <= currentScreenIndex + keepRange; i++) {
-      if (i >= 0 && !this.screens.has(i)) missing.push(i);
+      if (!this.screens.has(i)) missing.push(i);
     }
     missing.sort((a, b) => Math.abs(a - currentScreenIndex) - Math.abs(b - currentScreenIndex));
     if (missing.length > 0) {
@@ -147,7 +147,7 @@ export class World {
   // Builds screen i ahead of time (no cleanup): call while the player is still
   // approaching the next checkpoint so the boundary-crossing frame builds nothing.
   prefetchScreen(screenIndex) {
-    if (screenIndex >= 0 && !this.screens.has(screenIndex)) {
+    if (!this.screens.has(screenIndex)) {
       this.getOrCreateScreen(screenIndex);
     }
   }

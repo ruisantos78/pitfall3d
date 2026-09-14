@@ -302,7 +302,7 @@ class Game {
       this.player.update(delta, this.world);
 
       // 3. Update Current Screen Index based on Player Z
-      const currentScreenIndex = Math.max(0, Math.floor(-this.player.z / SCREEN_LENGTH));
+      const currentScreenIndex = Math.floor(-this.player.z / SCREEN_LENGTH);
       // Prefetch the screen after next while approaching the checkpoint (~2s
       // ahead at full speed): the boundary-crossing frame then builds nothing.
       const nextBoundaryZ = -(currentScreenIndex + 1) * SCREEN_LENGTH;

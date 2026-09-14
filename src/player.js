@@ -14,7 +14,7 @@ export const RUN_SPEED = 9.0;
 export const EYE_HEIGHT = 2.2;
 // Underground shortcut pace: Harry runs 1.5x faster in the tunnel (jumping
 // stays enabled — it is the only way past scorpions).
-export const TUNNEL_SPEED_MULT = 1.5;
+export const TUNNEL_SPEED_MULT = 2.0;
 // Grace period after releasing a vine during which an open crocodile mouth
 // cannot kill (enough time to clear the last croc and land back on track).
 export const CROC_BITE_GRACE_DURATION = 1.0;
@@ -360,11 +360,8 @@ export class Player {
     const prevZ = this.z;
     this.z += this.vz * delta;
 
-    // Prevent walking backwards off the starting edge of the map
-    if (this.z > 0) {
-      this.z = 0;
-      this.vz = Math.min(this.vz, 0);
-    }
+    // No barrier at the starting edge: the 255-screen map loops in both
+    // directions, so walking behind z = 0 enters screen -1 (phase 255).
 
     // Tunnel brick walls (authentic dead ends): solid 1m planes, block
     // passage in both directions (0.6m body clearance each side).
@@ -1017,7 +1014,7 @@ export class Player {
     const screenStartZ = -screenIndex * SCREEN_LENGTH;
     const screenEndZ = -(screenIndex + 1) * SCREEN_LENGTH;
     const minZ = screenEndZ + 2;
-    const maxZ = Math.min(8, screenStartZ + 10);
+    const maxZ = screenStartZ + 10;
     const candidates = [baseZ, baseZ - 4, baseZ + 4, baseZ - 8, baseZ + 8,
       baseZ - 12, baseZ + 12, baseZ - 16, baseZ + 16, baseZ - 20, baseZ + 20];
     for (const c of candidates) {
@@ -1051,13 +1048,13 @@ export class Player {
     // at the start of the screen where the player died (forward = -Z, start = +Z edge).
     if (world) {
       let baseZ;
-      if (this.checkpointZ !== null && this.checkpointZ < 8) {
+      if (this.checkpointZ !== null) {
         baseZ = this.checkpointZ;
       } else {
-        const screenIndex = Math.max(0, Math.floor(-this.z / SCREEN_LENGTH));
+        const screenIndex = Math.floor(-this.z / SCREEN_LENGTH);
         baseZ = -screenIndex * SCREEN_LENGTH + 6;
       }
-      const screenIndex = Math.max(0, Math.floor(-baseZ / SCREEN_LENGTH));
+      const screenIndex = Math.floor(-baseZ / SCREEN_LENGTH);
       // Steer clear of logs and other hazards: never spawns under a falling log
       // or on top of a pit / opening quicksand.
       this.z = this.findSafeRespawnZ(world, baseZ, screenIndex);

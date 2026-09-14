@@ -76,7 +76,7 @@ pitfall/
 #### [`src/player.js`](file:///home/ruisantos/Projects/pitfall/src/player.js)
 - **Physics Constants:**
   - `RUN_SPEED = 9.0` (walk speed forward/backward)
-  - `TUNNEL_SPEED_MULT = 1.5` (underground shortcut pace; jumping stays enabled for scorpions)
+  - `TUNNEL_SPEED_MULT = 2.0` (underground shortcut pace; jumping stays enabled for scorpions)
   - `JUMP_VELOCITY = 10.5`, `GRAVITY = 28.0` (air time ~0.75s, max running jump range = 6.75m)
   - `EYE_HEIGHT = 2.2` (Harry's first-person eye height)
   - **Natural Camera Tilt:** `camera.rotation.x = -0.04 + bobPitch` (~-2.3° tilt subtly facing the path ahead, framing the ground, obstacles and foreground arms).
@@ -102,7 +102,7 @@ pitfall/
   - Each screen is `SCREEN_LENGTH = 60` meters long on the `Z` axis.
   - `startZ = -index * 60`, `endZ = -(index + 1) * 60`.
 - **Authentic 255-Screen Loop (from `pitfall.asm`):**
-  - Only the 255 original screens exist: `getAuthenticSpec(index)` steps the bidirectional LFSR (`seed $C4`, right-step `(r<<1)|(b3^b4^b5^b7)`) `(index mod 255)` times, so screen 255 wraps back to phase 1 — forward-only travel, seamless loop.
+  - Only the 255 original screens exist: `getAuthenticSpec(index)` steps the bidirectional LFSR (`seed $C4`, right-step `(r<<1)|(b3^b4^b5^b7)`) `(index mod 255)` times, so screen 255 wraps back to phase 1 — seamless loop in BOTH directions (walking behind `z = 0` enters screen `-1`, phase `255`; negative indices wrap via `((index % 255) + 255) % 255`).
   - Bits decode exactly like the original: `0..2` ground object, `3..5` scene (`0` single hole, `1` triple holes, `2` tar pit, `3` blue swamp, `4` crocs, `5` treasure quicksand, `6` quicksand+vine, `7` blue quicksand), `6..7` tree pattern. Scene 4 splits by `treePat` parity: `CROCODILE_VINE` (vine crossing) vs `CROCODILE_POND` (croc-hopping only).
   - HUD shows the looping phase number (`001`..`255`).
 - **Underground (continuous tunnel + ladder scenes `HOLE_SINGLE`/`HOLE_TRIPLE`):**
