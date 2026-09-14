@@ -9,6 +9,8 @@ export class HUD {
     this.livesEl = document.getElementById('lives-display');
     this.screenEl = document.getElementById('screen-display');
     this.treasuresEl = document.getElementById('treasure-display');
+    this.compassUp = document.getElementById('compass-up');
+    this.compassDown = document.getElementById('compass-down');
     this.recordEl = document.getElementById('record-display');
     this.crtOverlay = document.getElementById('crt-overlay');
     this.btnSound = document.getElementById('btn-sound');
@@ -18,6 +20,7 @@ export class HUD {
     this.crocTextEl = document.getElementById('croc-status-text');
 
     this.crtEnabled = true;
+    this.lastJumpCue = 0;
     this.initControls();
   }
 
@@ -62,6 +65,11 @@ export class HUD {
   }
 
   update(player, currentScreenIndex, world) {
+    // Reset the alert icon styling first (it must never leak into text messages).
+    if (this.crocTextEl) {
+      this.crocTextEl.style.fontSize = '';
+      this.crocTextEl.style.color = '';
+    }
     // 1. Score
     if (this.scoreEl) {
       this.scoreEl.textContent = String(Math.max(0, player.score)).padStart(6, '0');
@@ -89,6 +97,14 @@ export class HUD {
       this.screenEl.textContent = String(phase).padStart(3, '0');
     }
 
+    // 4b. Heading arrows right of the phase number: current direction
+    // green, opposite direction light gray.
+    if (this.compassUp && this.compassDown) {
+      const north = player.targetRotY === 0;
+      this.compassUp.style.color = north ? '#7dd87d' : '#9aa0a8';
+      this.compassDown.style.color = north ? '#9aa0a8' : '#7dd87d';
+    }
+
     // 5. Treasures
     if (this.treasuresEl) {
       this.treasuresEl.textContent = `${player.treasuresCollected}`;
@@ -100,9 +116,44 @@ export class HUD {
     }
 
     if (player.isTripped && this.crocPromptEl) {
+      // Faceplant notice only when on-screen help is enabled.
+      if (!getShowHelp()) {
+        this.crocPromptEl.className = 'hud-box croc-status';
+        return;
+      }
       this.crocPromptEl.className = 'hud-box croc-status danger';
       if (this.crocTextEl) {
         this.crocTextEl.textContent = t('hint.tripped');
+      }
+      return;
+    }
+
+    // Rear-log aid, inverted facing only: warning triangle (no text),
+    // colored by proximity — yellow → orange → red as impact nears.
+    // Single purpose: rear logs while facing south. Nothing else uses it.
+    // (No vz gate: the interception time only exists when the log WILL reach
+    // you — standing still, walking back (S) or tripping into its path all
+    // count. A vz > 0.5 gate hid exactly those deaths.)
+    const threat = world ? world.nearestLogThreat : null;
+    if (
+      threat && !player.inTunnel && !player.climbing && !player.attachedVine &&
+      player.targetRotY !== 0 &&
+      threat.logZ < player.z && threat.t <= 3.6
+    ) {
+      // Text-presentation triangle (recolorable): yellow far, orange near, red now.
+      const alertColor = threat.t > 2.4 ? '#f8d820' : (threat.t > 1.2 ? '#f87800' : '#ff2200');
+      this.crocPromptEl.className = 'hud-box croc-status danger';
+      if (this.crocTextEl) {
+        this.crocTextEl.textContent = '⚠';
+        this.crocTextEl.style.fontSize = '28px';
+        this.crocTextEl.style.color = alertColor;
+      }
+      if (threat.t <= 0.7 && player.isGrounded) {
+        const now = performance.now();
+        if (now - this.lastJumpCue > 500) {
+          audio.playJumpCue();
+          this.lastJumpCue = now;
+        }
       }
       return;
     }

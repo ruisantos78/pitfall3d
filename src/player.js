@@ -955,6 +955,7 @@ export class Player {
     }
     
     this.deathReasonKey = reasonKey;
+    this.diedInTunnel = this.inTunnel;
     this.crocBiteGraceTimer = 0;
 
     // Fade to black on death
@@ -1015,6 +1016,32 @@ export class Player {
     return true;
   }
 
+  // Tunnel respawn clearance: away from patrolling scorpions and brick dead-ends.
+  isTunnelRespawnClear(world, z) {
+    for (const hazard of world.activeHazards) {
+      if (hazard.type === 'scorpion') {
+        const hz = hazard.mesh ? hazard.mesh.position.z : hazard.baseZ;
+        if (Math.abs(z - hz) < 4) return false;
+      }
+    }
+    if (world.activeTunnelWalls) {
+      for (const wl of world.activeTunnelWalls) {
+        if (Math.abs(z - wl.z) < 2.5) return false;
+      }
+    }
+    return true;
+  }
+
+  // Find a safe tunnel Z near the death spot.
+  findSafeTunnelRespawnZ(world, baseZ) {
+    const candidates = [baseZ, baseZ - 4, baseZ + 4, baseZ - 8, baseZ + 8,
+      baseZ - 12, baseZ + 12];
+    for (const c of candidates) {
+      if (this.isTunnelRespawnClear(world, c)) return c;
+    }
+    return baseZ;
+  }
+
   // Find a safe Z near the base: never under a falling log drop point.
   findSafeRespawnZ(world, baseZ, screenIndex) {
     const screenStartZ = -screenIndex * SCREEN_LENGTH;
@@ -1044,8 +1071,11 @@ export class Player {
     this.isTripped = false;
     this.tripStandTimer = 0;
     this.tripCooldown = 0;
-    // Always respawn on the surface (never born in the tunnel)
-    this.inTunnel = false;
+    // Scorpion death underground: respawn stays in the tunnel.
+    // Everything else respawns on the surface.
+    const tunnelRespawn = !!(world && this.deathReasonKey === 'death.scorpion' && this.diedInTunnel);
+    this.diedInTunnel = false;
+    this.inTunnel = tunnelRespawn;
     this.climbing = null;
     this.climbGrace = 0;
     this.crocBiteGraceTimer = 0;
@@ -1053,23 +1083,32 @@ export class Player {
     // Respawn at the last checkpoint (last boundary strip crossed); if no checkpoint,
     // at the start of the screen where the player died (forward = -Z, start = +Z edge).
     if (world) {
-      let baseZ;
-      if (this.checkpointZ !== null) {
-        baseZ = this.checkpointZ;
+      if (tunnelRespawn) {
+        this.z = this.findSafeTunnelRespawnZ(world, this.z);
       } else {
-        const screenIndex = Math.floor(-this.z / SCREEN_LENGTH);
-        baseZ = -screenIndex * SCREEN_LENGTH + 6;
+        let baseZ;
+        if (this.checkpointZ !== null) {
+          baseZ = this.checkpointZ;
+        } else {
+          const screenIndex = Math.floor(-this.z / SCREEN_LENGTH);
+          baseZ = -screenIndex * SCREEN_LENGTH + 6;
+        }
+        const screenIndex = Math.floor(-baseZ / SCREEN_LENGTH);
+        // Steer clear of logs and other hazards: never spawns under a falling log
+        // or on top of a pit / opening quicksand.
+        this.z = this.findSafeRespawnZ(world, baseZ, screenIndex);
       }
-      const screenIndex = Math.floor(-baseZ / SCREEN_LENGTH);
-      // Steer clear of logs and other hazards: never spawns under a falling log
-      // or on top of a pit / opening quicksand.
-      this.z = this.findSafeRespawnZ(world, baseZ, screenIndex);
     } else {
       // Fallback: move back 8 units
       this.z += 8;
     }
-    // Drop from the sky like the original: spawns high up and gravity does the rest.
-    this.y = this.RESPAWN_DROP_HEIGHT;
+    if (tunnelRespawn) {
+      // Short drop back to the tunnel floor.
+      this.y = TUNNEL_FLOOR_Y + 2;
+    } else {
+      // Drop from the sky like the original: spawns high up and gravity does the rest.
+      this.y = this.RESPAWN_DROP_HEIGHT;
+    }
     this.respawnDrop = true;
     // Keep the facing direction from before death (no forced turn-around).
     if (this.targetRotY === undefined) this.targetRotY = 0;

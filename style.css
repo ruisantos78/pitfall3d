@@ -121,6 +121,33 @@ body {
   white-space: nowrap;
 }
 
+/* Setas de direção à direita do número da fase: ativa verde, oposta cinza */
+.screen-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.screen-num {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.compass-arrows {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.compass-arrows .compass-arrow {
+  font-size: 18px;
+  letter-spacing: 1px;
+  line-height: 1.2;
+}
+
 .score-box .hud-val {
   color: #ffeb3b;
 }

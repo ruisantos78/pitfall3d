@@ -27,6 +27,7 @@ export class World {
     this.activeVines = [];
     this.activeCrocodiles = [];
     this.activeRollingLogs = [];
+    this.nearestLogThreat = null; // { t, logZ } recomputed every frame (rear warning)
     this.activeTreasures = [];
     this.activeHazards = [];
     this.animatedCampfires = [];
@@ -1138,7 +1139,7 @@ export class World {
   }
 
   // Update dynamic elements (animations, rolling logs, vine pendulum)
-  update(delta, playerZ = 0, inTunnel = false, climbing = null, northFacing = true) {
+  update(delta, playerZ = 0, inTunnel = false, climbing = null, northFacing = true, playerVz = 0) {
     // 1b. Ladder side follows the travel direction: north wall (-Z) going
     // forward, south wall (+Z) coming back — the player faces the rungs
     // while climbing either way.
@@ -1208,6 +1209,8 @@ export class World {
     // over time via a clock — fully deterministic, no randomness: drop from sky,
     // roll to the spike pit, where the log CEASES TO EXIST (disappears into the spikes,
     // does not continue falling).
+    // nearestLogThreat feeds the first-person rear warning (HUD + jump cue).
+    this.nearestLogThreat = null;
     this.activeRollingLogs.forEach(l => {
       l.clock += delta;
       // Waiting its turn in the staggered queue (invisible up in the sky).
@@ -1286,6 +1289,23 @@ export class World {
         // Moves towards player (+Z direction) — only rolls after touching the ground
         l.z += l.speed * delta;
         l.mesh.position.z = l.z;
+
+        // Proximity ticks: knock interval shrinks as the log nears the player.
+        const ldz = Math.abs(l.z - playerZ);
+        if (ldz < 25) {
+          l.knockTimer = (l.knockTimer ?? 0) - delta;
+          if (l.knockTimer <= 0) {
+            audio.playWoodKnock(0.06 + 0.3 * (1 - ldz / 25));
+            l.knockTimer = 0.12 + (ldz / 25) * 0.7;
+          }
+        }
+        // 1D interception time with the player: t = (log - player) / (vp - vlog).
+        const relV = playerVz - l.speed;
+        let tHit = Infinity;
+        if (Math.abs(relV) > 0.5) tHit = (l.z - playerZ) / relV;
+        if (tHit >= 0 && tHit < 4 && (this.nearestLogThreat === null || tHit < this.nearestLogThreat.t)) {
+          this.nearestLogThreat = { t: tHit, logZ: l.z };
+        }
 
         // When the log reaches the exit pit, it gets impaled instead of
         // teleporting back immediately.

@@ -254,6 +254,35 @@ class RetroAudio {
     osc.stop(now + 0.12);
   }
 
+  // Wood knock: rolling-log proximity tick, volume scales with distance
+  playWoodKnock(volume = 0.2) {
+    if (!this.enabled) return;
+    this.init();
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(190, now);
+    osc.frequency.exponentialRampToValueAtTime(85, now + 0.07);
+
+    gain.gain.setValueAtTime(volume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.07);
+  }
+
+  // Jump-now cue: bright square beep when a log is about to hit
+  playJumpCue() {
+    if (!this.enabled) return;
+    this.playSteps([[880, 0.09]], 0.2);
+  }
+
   // Footstep tap (triangle 160→70Hz carries on small speakers;
   // pure low sine was inaudible outside headphones)
   playStep() {

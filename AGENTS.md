@@ -164,7 +164,8 @@ pitfall/
   - 6-digit score (`padStart(6, '0')`).
   - 20-minute countdown timer (`MM:SS`).
   - Continuous progressive treasure counter (`player.treasuresCollected`), with no fixed cap or 32 suffix.
-  - Dynamic proximity indicators: crocodile mouth danger/safety warning and vine-grab prompt.
+  - Small stacked arrows right of the phase number (current heading green, opposite light gray) showing the heading sense.
+  - Dynamic proximity indicators: crocodile mouth danger/safety warning, vine-grab prompt, rear-log aid in the inverted direction only (recolorable ⚠ icon: yellow → orange → red over the 3.6s before impact from 1D interception time; nearest threat in `world.nearestLogThreat`).
   - Audio toggle and retro CRT filter with scanlines.
   - Dynamic texts always via `t()` from `i18n.js` (never literal PT/EN); help warnings (`croc-status`) hideable via `getShowHelp()`.
 
@@ -186,6 +187,7 @@ pitfall/
   - `playLifeLost()` & `playGameOver()`: original death jingle 140→80→140→100Hz (~2.1s).
   - `playChomp()` & `playCrocSnap()`: filtered white noise for bite and fang snap.
   - `playQuicksandRumble()`, `playGroundThud()`: original effects for the opening quicksand.
+  - `playWoodKnock(volume)`: rolling-log proximity tick (interval shrinks with distance); `playJumpCue()`: bright beep in the jump window. Hazard sounds only play for hazards ahead of the facing direction (2m tolerance).
 
 ---
 

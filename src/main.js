@@ -296,7 +296,7 @@ class Game {
       // Player position drives the pooled-light assignment (tunnel lights only
       // compete for slots while Harry is underground; surface lights only
       // while he is up there). Facing drives the ladder wall side.
-      this.world.update(delta, this.player.z, this.player.inTunnel, this.player.climbing, this.player.targetRotY === 0);
+      this.world.update(delta, this.player.z, this.player.inTunnel, this.player.climbing, this.player.targetRotY === 0, this.player.vz);
 
       // 2. Update First-Person Player Physics & Actions
       this.player.update(delta, this.world);
