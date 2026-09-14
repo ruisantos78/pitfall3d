@@ -1,14 +1,15 @@
 // World and Corridor Generator for Atari Pitfall 3D
 import * as THREE from 'three';
-import { 
-  createTreeModel, 
-  createLogModel, 
-  createCrocodileModel, 
-  createVineModel, 
-  createScorpionModel, 
-  createCampfireModel, 
+import {
+  createTreeModel,
+  createLogModel,
+  createCrocodileModel,
+  createVineModel,
+  createScorpionModel,
+  createCampfireModel,
   createTreasureModel,
   createOpeningQuicksandModel,
+  createBrickWallModel,
   createSnakeModel
 } from './models.js';
 import { createVoxelGeometry, createVoxelMaterial } from './voxel.js';
@@ -32,6 +33,7 @@ export class World {
     this.animatedTorches = [];
     this.torchTime = 0;
     this.activeOpeningPits = [];
+    this.activeTunnelWalls = []; // brick dead-ends (authentic bit-7 wall logic)
 
     // Fixed pool of PointLights (constant count => shaders compile once and
     // never again on screen crossings). Per-frame the nearest light emitters
@@ -176,6 +178,7 @@ export class World {
     this.animatedCampfires = this.animatedCampfires.filter(c => c.screenIndex !== screen.index);
     this.animatedTorches = this.animatedTorches.filter(t => t.screenIndex !== screen.index);
     this.activeOpeningPits = this.activeOpeningPits.filter(p => p.screenIndex !== screen.index);
+    this.activeTunnelWalls = this.activeTunnelWalls.filter(wl => wl.screenIndex !== screen.index);
     this.logDebris = this.logDebris.filter(d => d.screenIndex !== screen.index);
   }
 
@@ -197,7 +200,7 @@ export class World {
     this.addTunnel(group, index, startZ, endZ);
     // 2c. Scorpion ONLY in tunnels without ladders (away from landings)
     if (screenType !== 'HOLE_SINGLE' && screenType !== 'HOLE_TRIPLE') {
-      this.addScorpion(group, index, midZ, TUNNEL_FLOOR_Y + 0.08, 12);
+      this.addScorpion(group, index, midZ, TUNNEL_FLOOR_Y + 0.08, 3);
     }
     // 2c. Cave ceiling (solid here; shaft screens will cut holes in it)
     if (screenType !== 'HOLE_SINGLE' && screenType !== 'HOLE_TRIPLE') {
@@ -364,10 +367,15 @@ export class World {
 
   buildScreenFeatures(group, index, startZ, endZ, midZ, type) {
     // Authentic spec from pitfall.asm LFSR (seed $C4, stepped right)
-    const spec = this.getAuthenticSpec(index) || { objectType: 4, sceneType: 0, treePat: 0 };
+    const spec = this.getAuthenticSpec(index) || { rand: 0, objectType: 4, sceneType: 0, treePat: 0 };
     const obj = spec.objectType;
     const scene = spec.sceneType;
     const treasureKinds = ['money', 'silver', 'gold', 'diamond'];
+    // Authentic brick dead-end (pitfall.asm ContRandom): on ladder scenes
+    // (0/1) bit 7 picks the wall side — 17/160 (left) or 136/160 (right).
+    // Screen-left is behind us (+Z), so LEFT lands near the start edge.
+    const wallFrac = ((spec.rand ?? 0) >> 7) & 1 ? 136 / 160 : 17 / 160;
+    const tunnelWallZ = startZ - SCREEN_LENGTH * wallFrac;
 
     // Overlay ground object — surface map only (pitfall.asm bits 0..2).
     // Underground (tunnel + scorpion) for scenes 0-1 is built separately.
@@ -401,6 +409,8 @@ export class World {
         // jump over to stay on the surface.
         this.addLadderShaft(group, index, midZ, 2);
         this.addCaveCeiling(group, startZ, endZ, [{ centerZ: midZ, half: 2 }]);
+        // Authentic brick dead-end in the tunnel below (bit-7 side).
+        this.addTunnelWall(group, index, tunnelWallZ);
         addOverlayObject(midZ + 14);
         break;
 
@@ -410,6 +420,8 @@ export class World {
         this.addLadderShaft(group, index, midZ, 1.5, true);
         this.addLadderShaft(group, index, midZ - 12, 1.5, false);
         this.addCaveCeiling(group, startZ, endZ, [12, 0, -12].map((off) => ({ centerZ: midZ + off, half: 1.5 })));
+        // Authentic brick dead-end in the tunnel below (bit-7 side).
+        this.addTunnelWall(group, index, tunnelWallZ);
         addOverlayObject(midZ + 20);
         break;
 
@@ -732,6 +744,16 @@ export class World {
     });
   }
 
+  // Authentic brick dead-end wall (pitfall.asm): on ladder screens the tunnel
+  // is blocked on one side, forcing Harry back to the surface. Spans the full
+  // tunnel cross-section (floor -8 up to the ceiling slab at -3).
+  addTunnelWall(group, screenIndex, wallZ) {
+    const wall = createBrickWallModel(0.25, 0.25);
+    wall.position.set(-4.5, TUNNEL_FLOOR_Y, wallZ - 0.5);
+    group.add(wall);
+    this.activeTunnelWalls.push({ screenIndex, z: wallZ });
+  }
+
   // Underground pit (HOLE_* screens): dirt walls from level 0 down to the tunnel.
   // As in the original, NOT every pit has a ladder: only the middle one has wooden
   // rungs (up and down); the side ones drop straight in.
@@ -755,20 +777,25 @@ export class World {
 
     // Ladder: 2 rails + rungs descending in the gap (middle pit only).
     // Doesn't reach the bottom: the two lowest rungs have been removed.
+    // Grouped so the whole ladder can slide to the entry wall: north side
+    // going forward (-Z), south side coming back (+Z).
+    let ladder = null;
     if (hasLadder) {
       const railGeo = new THREE.BoxGeometry(0.12, 5.5, 0.12);
       const rungGeo = new THREE.BoxGeometry(1.0, 0.09, 0.09);
-      const ladderZ = centerZ - half + 0.45;
+      ladder = new THREE.Group();
+      ladder.position.set(0, 0, centerZ - half + 0.45); // north wall by default
       for (const x of [-0.5, 0.5]) {
         const rail = new THREE.Mesh(railGeo, this.ladderMaterial);
-        rail.position.set(x, -3.0, ladderZ);
-        group.add(rail);
+        rail.position.set(x, -3.0, 0);
+        ladder.add(rail);
       }
       for (let y = -0.5; y >= TUNNEL_FLOOR_Y + 2.2; y -= 0.8) {
         const rung = new THREE.Mesh(rungGeo, this.ladderMaterial);
-        rung.position.set(0, y, ladderZ);
-        group.add(rung);
+        rung.position.set(0, y, 0);
+        ladder.add(rung);
       }
+      group.add(ladder);
     }
 
     this.activeHazards.push({
@@ -779,6 +806,7 @@ export class World {
       centerZ,
       half,
       hasLadder,
+      ladder, // null on ladder-free side shafts
     });
   }
 
@@ -1110,7 +1138,17 @@ export class World {
   }
 
   // Update dynamic elements (animations, rolling logs, vine pendulum)
-  update(delta, playerZ = 0, inTunnel = false, climbing = null) {
+  update(delta, playerZ = 0, inTunnel = false, climbing = null, northFacing = true) {
+    // 1b. Ladder side follows the travel direction: north wall (-Z) going
+    // forward, south wall (+Z) coming back — the player faces the rungs
+    // while climbing either way.
+    const ladderSide = northFacing ? -1 : 1;
+    for (const h of this.activeHazards) {
+      if (h.type === 'ladder_shaft' && h.ladder) {
+        h.ladder.position.z = h.centerZ + ladderSide * (h.half - 0.45);
+      }
+    }
+
     // 1. Update Swinging Vines
     this.activeVines.forEach(v => {
       v.time += delta * v.vine.speed;

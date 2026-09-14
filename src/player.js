@@ -12,6 +12,9 @@ export const GRAVITY = 28.0;
 export const JUMP_VELOCITY = 10.5;
 export const RUN_SPEED = 9.0;
 export const EYE_HEIGHT = 2.2;
+// Underground shortcut pace: Harry runs 1.5x faster in the tunnel (jumping
+// stays enabled — it is the only way past scorpions).
+export const TUNNEL_SPEED_MULT = 1.5;
 // Grace period after releasing a vine during which an open crocodile mouth
 // cannot kill (enough time to clear the last croc and land back on track).
 export const CROC_BITE_GRACE_DURATION = 1.0;
@@ -346,9 +349,11 @@ export class Player {
     let targetVz = 0;
     // 0 = face -Z (dir = -1), Math.PI = face +Z (dir = 1)
     const dir = this.targetRotY === Math.PI ? 1 : -1;
-    
-    if (this.moveForward) targetVz += RUN_SPEED * dir;
-    if (this.moveBackward) targetVz -= RUN_SPEED * dir;
+    // Underground shortcut pace (1.5x); surface pace otherwise.
+    const pace = this.inTunnel ? RUN_SPEED * TUNNEL_SPEED_MULT : RUN_SPEED;
+
+    if (this.moveForward) targetVz += pace * dir;
+    if (this.moveBackward) targetVz -= pace * dir;
 
     // Responsive arcade acceleration
     this.vz = THREE.MathUtils.lerp(this.vz, targetVz, delta * 15);
@@ -361,14 +366,31 @@ export class Player {
       this.vz = Math.min(this.vz, 0);
     }
 
-    // Checkpoint: when crossing a screen boundary forward (-Z),
-    // register 4m past the strip as the respawn point.
-    if (this.vz < 0) {
-      const prevK = Math.floor(-prevZ / SCREEN_LENGTH);
-      const newK = Math.floor(-this.z / SCREEN_LENGTH);
-      if (newK > prevK) {
-        this.checkpointZ = -newK * SCREEN_LENGTH - 4;
+    // Tunnel brick walls (authentic dead ends): solid 1m planes, block
+    // passage in both directions (0.6m body clearance each side).
+    if (this.inTunnel && world.activeTunnelWalls) {
+      for (const wl of world.activeTunnelWalls) {
+        const lo = wl.z - 1.1;
+        const hi = wl.z + 1.1;
+        if (prevZ >= hi && this.z < hi) {
+          this.z = hi;
+          this.vz = 0;
+        } else if (prevZ <= lo && this.z > lo) {
+          this.z = lo;
+          this.vz = 0;
+        }
       }
+    }
+
+    // Checkpoint: when crossing a screen boundary in either direction,
+    // register 4m past the strip as the respawn point (forward: past the
+    // screen start edge; backward: past the far edge coming back).
+    const prevK = Math.floor(-prevZ / SCREEN_LENGTH);
+    const newK = Math.floor(-this.z / SCREEN_LENGTH);
+    if (newK > prevK) {
+      this.checkpointZ = -newK * SCREEN_LENGTH - 4;
+    } else if (newK < prevK) {
+      this.checkpointZ = -(newK + 1) * SCREEN_LENGTH + 4;
     }
 
     // Single action button: JUMP (or CLIMB the ladder in the tunnel)

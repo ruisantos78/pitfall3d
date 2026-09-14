@@ -76,6 +76,7 @@ pitfall/
 #### [`src/player.js`](file:///home/ruisantos/Projects/pitfall/src/player.js)
 - **Physics Constants:**
   - `RUN_SPEED = 9.0` (walk speed forward/backward)
+  - `TUNNEL_SPEED_MULT = 1.5` (underground shortcut pace; jumping stays enabled for scorpions)
   - `JUMP_VELOCITY = 10.5`, `GRAVITY = 28.0` (air time ~0.75s, max running jump range = 6.75m)
   - `EYE_HEIGHT = 2.2` (Harry's first-person eye height)
   - **Natural Camera Tilt:** `camera.rotation.x = -0.04 + bobPitch` (~-2.3° tilt subtly facing the path ahead, framing the ground, obstacles and foreground arms).
@@ -106,8 +107,9 @@ pitfall/
   - HUD shows the looping phase number (`001`..`255`).
 - **Underground (continuous tunnel + ladder scenes `HOLE_SINGLE`/`HOLE_TRIPLE`):**
   - EVERY screen has a tunnel stretch (`addTunnel`: floor at `TUNNEL_FLOOR_Y = -8`, side dirt walls, warm lamp/torch glow via pooled-light emitters, NO end walls) — the underground runs seamlessly through the whole game; climb up at any ladder shaft.
+  - Authentic brick dead-ends (`pitfall.asm` `ContRandom`, see `assets/pitfall.asm`): on ladder screens (scene `0`/`1`) bit 7 of the seed places a `DARK_RED` brick wall in the tunnel at x=`17`/160 (left, near the start edge) or `136`/160 (right) — solid 1m plane, blocks both directions, forcing Harry back to the surface. Other screens get the scorpion instead (never both, like the original).
   - Cave ceiling (`addCaveCeiling`): dark slab at `y=-3` hiding the surface world from below, with holes ONLY over ladder shafts (light + passage); solid everywhere else.
-  - Ladder shafts (`addLadderShaft`, NO surrounding walls, just the wooden ladder — ladder ONLY in the middle hole, like the original; side holes drop straight in). Walking in (grounded) auto-grabs and climbs down at 7 m/s; jumping over avoids it; shafts never kill. `SPACE` under a shaft climbs back up (1s anti-regrab grace).
+  - Ladder shafts (`addLadderShaft`, NO surrounding walls, just the wooden ladder — ladder ONLY in the middle hole, like the original; side holes drop straight in). The ladder is a movable `Group`: north wall going forward (`-Z`), south wall coming back (`+Z`, repositioned every frame from the camera facing). Walking in (grounded) auto-grabs and climbs down at 7 m/s; jumping over avoids it; shafts never kill. `SPACE` under a shaft climbs back up (1s anti-regrab grace).
   - Surface pits are shallow (2.5m) on purpose so they never invade the corridor below.
   - Scorpion in ladder-free tunnels only (`addScorpion` at tunnel `midZ`, slow patrol `~2.2 m/s`, same-level kill) — ladder screens stay scorpion-free so every landing is safe.
 - **Classic Screen Sequence (all LFSR-driven, no invented loop):**
@@ -142,6 +144,8 @@ pitfall/
 - `createTreasureModel(type, voxelSize = 0.22)`:
   - Money bag with `$` sign, gold/silver bars and diamond ring with 2-layer golden band; the diamond is lifted (`liftY = 0.3` in `addTreasure`) so the band doesn't look sunken into the ground.
   - Positioned at `Y = 0.05` for smooth rotation and full visibility over the trail.
+- `createBrickWallModel(voxelSize = 0.5)`:
+  - Authentic underground dead-end (`pitfall.asm` `Wall`/`WallColor` data): 9m × 5m × 1m running-bond brickwork in `DARK_RED` with `GREY` mortar (full mortar row every 4th course, staggered joints, alternating brick shades), spanning the full tunnel cross-section.
 - `createScorpionModel(voxelSize = 0.28)`:
   - Giant high-visibility arcade scorpion with vibrant red carapace and obsidian/gold bands.
   - Tall arched tail with stinger and glowing yellow venom bulb at `Y = 6` (~1.68m tall).
