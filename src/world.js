@@ -947,13 +947,13 @@ export class World {
       timer: Math.random() * 2.0,
       isOpen: false,
       openCount: 0,
-      phase: 'closed', // closed | opening | open | closing (closes from the player's edge)
+      phase: 'closed', // closed | opening | open | closing (fills edges→middle)
       wasOpen: false,
       rumblePlayed: false,
-      // Cycle (seconds): closed-solid pause (0.5s) → opening wave entry→exit (1.8s)
-      // → fully open (5.0s) → closing wave from the player's edge, entry→exit
-      // (1.8s, ~11.1 m/s vs Harry's 9.0: wave is visibly faster than the player,
-      // guaranteeing safety).
+      // Cycle (seconds): closed-solid pause (0.5s) → sinking spreads
+      // middle→edges (1.8s) → fully open (5.0s) → filling converges
+      // edges→middle (1.8s, ~5.6 m/s per side: slower than Harry's 9.0,
+      // so pace the closing front to cross).
       // Total: 9.1s, open for most of the cycle.
       closedDur: 0.5,
       openingDur: 1.8,
@@ -1374,9 +1374,9 @@ export class World {
     });
 
     // 7. Update Disappearing Quicksand Pits (per-section cycle)
-    // Phases: closed-solid pause (0.5s) → opening wave from entry to exit
-    // (2.2s) → fully open (5.0s) → closing wave from the player's edge,
-    // entry→exit (2.2s, surf alongside the wave to cross).
+    // Phases: closed-solid pause (0.5s) → sinking spreads middle→edges
+    // (2.2s) → fully open (5.0s) → filling converges edges→middle
+    // (2.2s, pace the closing front to cross).
     // Total: 9.9s. Each section splits in half (X) and sinks (Y).
     this.activeOpeningPits.forEach(p => {
       p.timer += delta;
@@ -1413,11 +1413,13 @@ export class World {
       let openCount = 0;
       p.segments.forEach((seg, i) => {
         // Moment when this section should be open (binary target 0/1).
-        // Opening AND closing as a wave from the entry (i=0, +Z, player's edge) to
-        // the exit (i=n-1, -Z): the closing wave sweeps at ~9.1 m/s, the same
-        // direction and pace as Harry (9.0), so the player can run alongside the wave.
-        const openStart = p.closedDur + (i * p.openingDur) / n;
-        const closeStart = p.closedDur + p.openingDur + p.openDur + (i * p.closingDur) / n;
+        // Bidirectional like the original: sinking starts in the MIDDLE and
+        // spreads to both edges, filling starts at BOTH edges and meets in
+        // the middle. d = 0 at the center, 1 at the edges.
+        const half = Math.max(0.5, (n - 1) / 2);
+        const d = Math.abs(i - (n - 1) / 2) / half;
+        const openStart = p.closedDur + d * p.openingDur;
+        const closeStart = p.closedDur + p.openingDur + p.openDur + (1 - d) * p.closingDur;
         const target = cycleTime >= openStart && cycleTime < closeStart ? 1 : 0;
 
         // Smooth section open/close

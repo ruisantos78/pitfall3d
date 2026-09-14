@@ -1095,9 +1095,9 @@ export function createPlayerArmsModel() {
  * Creates the iconic Atari Pitfall Disappearing Quicksand Hole (quicksand that opens and closes)
  * LONG EDITION (20m, like the vine lake): the lid is split into NUM_SEGMENTS
  * sections along Z that split in half (halves slide from the center to
- * the sides on X) and sink on Y, opening in a wave from the entry (+Z, hero
- * side) to the exit (-Z) and closing in REVERSE order (exit->entry) —
- * the mirror of the opening.
+ * the sides on X) and sink on Y, like the original: sinking starts in the
+ * MIDDLE and spreads to both edges, filling starts at BOTH edges and meets
+ * in the middle (see the per-section timing in world.js).
  */
 export function createOpeningQuicksandModel(voxelSize = 0.45, numSegments = 12) {
   const group = new THREE.Group();

@@ -349,7 +349,7 @@ export class Player {
     let targetVz = 0;
     // 0 = face -Z (dir = -1), Math.PI = face +Z (dir = 1)
     const dir = this.targetRotY === Math.PI ? 1 : -1;
-    // Underground shortcut pace (1.5x); surface pace otherwise.
+    // Underground shortcut pace (2x); surface pace otherwise.
     const pace = this.inTunnel ? RUN_SPEED * TUNNEL_SPEED_MULT : RUN_SPEED;
 
     if (this.moveForward) targetVz += pace * dir;

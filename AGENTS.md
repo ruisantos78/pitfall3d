@@ -37,7 +37,7 @@ Any agent modifying this code **MUST PRESERVE** these guidelines:
 6. **Long Moving Quicksand (20 Meters, Vine-Pit Size):**
    - The opening/closing quicksand hole is **20 meters long** (`radius = 10`), same size as the vine lake.
    - The player's max running jump is **6.75 meters**. Therefore it is **physically impossible to jump over it when open**.
-   - Correct crossing is surfing the closing wave: it sweeps entry→exit from the hero's edge at ~9.1 m/s (same direction and pace as Harry at `RUN_SPEED = 9.0`), so the player runs along with it while the pit closes beneath their feet. The pit stays open most of the 9.9s cycle; the fully-closed pause is only 0.5s.
+   - Correct crossing is pacing the filling front: filling converges edges→middle (~5.6 m/s per side, slower than Harry at `RUN_SPEED = 9.0`), sinking spreads middle→edges — like the original. The pit stays open most of the 9.9s cycle; the fully-closed pause is only 0.5s.
 7. **Open Treasure Count (No 32 Cap):**
    - In the Atari 2600 classic there were 32 treasures spread across underground and surface screens.
    - In the continuous procedurally generated 3D game, the player can explore indefinitely and rescue **more than 32 treasures**.
@@ -123,7 +123,7 @@ pitfall/
 - **Dynamic Updates (`world.update(delta, playerZ, inTunnel, climbing)`):**
   - Vine swing animation (`v.vine.pivot.rotation.x`).
   - 4.4s crocodile mouth cycle (closed, orange-eyed alert, red open, snap shut).
-  - 9.9s quicksand cycle (fully closed pause for 0.5s, entry→exit opening wave for 2.2s, fully open for 5.0s, entry→exit closing wave from the hero's edge for 2.2s, surfable at ~9.1 m/s vs Harry's 9.0).
+  - 9.9s quicksand cycle (fully closed pause for 0.5s, sinking spreads middle→edges for 2.2s, fully open for 5.0s, filling converges edges→middle for 2.2s).
   - Fixed pool of 8 `PointLight`s (never added/removed, so shaders compile once): per-frame the nearest emitters (tunnel lamps/torches, scorpion, campfires) win a slot. Zone-split: on the surface only surface emitters are eligible, underground (or climbing) only tunnel ones — each zone stops paying for the other's lights.
 
 #### [`src/models.js`](file:///home/ruisantos/Projects/pitfall/src/models.js)
