@@ -1,6 +1,7 @@
 // Atari 2600 Pitfall HUD & UI Management
 import { audio } from './audio.js';
-import { t, getShowHelp, getHighScore } from './i18n.js';
+import { t } from './i18n.js';
+import { getShowHelp, getHighScore } from './settings.js';
 
 export class HUD {
   constructor() {

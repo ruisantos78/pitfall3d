@@ -13,3 +13,7 @@ export { createTreasureModel, TreasureModel } from './TreasureModel.js';
 export { createPlayerArmsModel, PlayerArmsModel } from './PlayerArmsModel.js';
 export { createOpeningQuicksandModel, OpeningQuicksandModel } from './OpeningQuicksandModel.js';
 export { createSnakeModel, SnakeModel } from './SnakeModel.js';
+export { createBoundaryFlagsModel, BoundaryFlagsModel } from './BoundaryFlagsModel.js';
+export { createLadderModel, LadderModel } from './LadderModel.js';
+export { createTunnelTorchModel, TunnelTorchModel } from './TunnelTorchModel.js';
+export { createSpikesPitModel, SpikesPitModel } from './SpikesPitModel.js';

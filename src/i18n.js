@@ -1,5 +1,13 @@
-// Languages (PT/EN) + user preferences persisted in the browser (localStorage)
-const STORAGE_KEY = 'pitfall3d-settings';
+// Internationalization (PT/EN strings and translation helpers)
+import {
+  settings,
+  getLanguage,
+  setLanguage,
+  getShowHelp,
+  setShowHelp,
+  getHighScore,
+  submitScore,
+} from './settings.js';
 
 const STRINGS = {
   pt: {
@@ -167,69 +175,29 @@ const STRINGS = {
   },
 };
 
-let lang = 'pt';
-let showHelp = false;
-let highScore = 0;
-
-try {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw) {
-    const saved = JSON.parse(raw);
-    if (saved.lang === 'pt' || saved.lang === 'en') lang = saved.lang;
-    if (typeof saved.showHelp === 'boolean') showHelp = saved.showHelp;
-    if (Number.isFinite(saved.highScore) && saved.highScore > 0) highScore = Math.floor(saved.highScore);
+// Keep DOM synced when language preference changes
+settings.onChange((key, val) => {
+  if (key === 'language') {
+    applyStaticTexts();
+    document.documentElement.lang = val === 'pt' ? 'pt-BR' : 'en';
   }
-} catch {
-  // localStorage unavailable: fall back to defaults
-}
-
-function persist() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ lang, showHelp, highScore }));
-  } catch {
-    // Silently ignore storage errors (private mode, quota exceeded, etc.)
-  }
-}
+});
 
 export function t(key) {
-  return STRINGS[lang][key] ?? STRINGS.pt[key] ?? key;
+  const currentLang = settings.getLanguage();
+  return STRINGS[currentLang]?.[key] ?? STRINGS.pt[key] ?? key;
 }
 
-export function getLanguage() {
-  return lang;
-}
-
-export function setLanguage(next) {
-  if (next !== 'pt' && next !== 'en') return;
-  lang = next;
-  persist();
-  applyStaticTexts();
-  document.documentElement.lang = lang === 'pt' ? 'pt-BR' : 'en';
-}
-
-export function getShowHelp() {
-  return showHelp;
-}
-
-export function setShowHelp(next) {
-  showHelp = !!next;
-  persist();
-}
-
-export function getHighScore() {
-  return highScore;
-}
-
-// Records the score; returns true if it's a new high score
-export function submitScore(score) {
-  const value = Math.floor(score);
-  if (value > highScore) {
-    highScore = value;
-    persist();
-    return true;
-  }
-  return false;
-}
+// Re-export settings helpers for backward compatibility
+export {
+  settings,
+  getLanguage,
+  setLanguage,
+  getShowHelp,
+  setShowHelp,
+  getHighScore,
+  submitScore,
+};
 
 // Applies data-i18n (text), data-i18n-aria (aria-label) and data-i18n-title (title)
 export function applyStaticTexts() {

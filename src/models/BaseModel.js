@@ -41,6 +41,7 @@ export const C = {
 export const GEO_CACHE = new Map();
 export const GEO_SET = new Set();
 export const SHARED_MATS = new Set();
+export const MAT_CACHE = new Map();
 
 export const SHARED_MATERIAL = createVoxelMaterial();
 
@@ -62,6 +63,16 @@ export class BaseModel {
       GEO_SET.add(geo);
     }
     return geo;
+  }
+
+  static memoMaterial(key, build) {
+    let mat = MAT_CACHE.get(key);
+    if (!mat) {
+      mat = build();
+      MAT_CACHE.set(key, mat);
+      SHARED_MATS.add(mat);
+    }
+    return mat;
   }
 
   static isSharedModelGeometry(geo) {

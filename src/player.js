@@ -3,8 +3,23 @@ import * as THREE from 'three';
 import { audio } from './audio.js';
 import { SCREEN_LENGTH, TUNNEL_FLOOR_Y, CEIL_TOP_Y, PIT_FLOOR_Y, screenRoom } from './world.js';
 import { createPlayerArmsModel } from './models/index.js';
-import { t, getHighScore, getShowHelp, submitScore } from './i18n.js';
+import { t } from './i18n.js';
+import { getHighScore, getShowHelp, submitScore } from './settings.js';
 import { DEBUG_GOD_MODE } from './debug.js';
+import {
+  MoveForwardCommand,
+  MoveBackwardCommand,
+  TurnAroundCommand,
+  ActionJumpCommand,
+  ResetCommand,
+  GameOverCommand,
+  DieCommand,
+  RespawnCommand,
+  VineGrabCommand,
+  VineReleaseCommand,
+  VineTransferCommand,
+  CheckCollisionsCommand,
+} from './commands/index.js';
 
 export const GRAVITY = 28.0;
 export const JUMP_VELOCITY = 10.5;
@@ -119,33 +134,30 @@ export class Player {
 
       if (e.code === 'KeyW' || e.code === 'ArrowUp') {
         if (this.touchOnly) return;
-        this.moveForward = true;
+        new MoveForwardCommand(this, true).execute();
       } else if (e.code === 'KeyS' || e.code === 'ArrowDown') {
         if (this.touchOnly) return;
-        this.moveBackward = true;
+        new MoveBackwardCommand(this, true).execute();
       } else if (e.code === 'KeyA' || e.code === 'ArrowLeft' || e.code === 'KeyD' || e.code === 'ArrowRight') {
         if (this.touchOnly) return;
         if (!this.turnJustPressed) {
-          this.targetRotY = this.targetRotY === 0 ? Math.PI : 0;
+          new TurnAroundCommand(this).execute();
           this.turnJustPressed = true;
         }
       } else if (e.code === 'Space' || e.code === 'Enter') {
-        if (!this.actionPressed) {
-          this.actionJustPressed = true;
-        }
-        this.actionPressed = true;
+        new ActionJumpCommand(this, true).execute();
       }
     });
 
     window.addEventListener('keyup', (e) => {
       if (e.code === 'KeyW' || e.code === 'ArrowUp') {
-        this.moveForward = false;
+        new MoveForwardCommand(this, false).execute();
       } else if (e.code === 'KeyS' || e.code === 'ArrowDown') {
-        this.moveBackward = false;
+        new MoveBackwardCommand(this, false).execute();
       } else if (e.code === 'KeyA' || e.code === 'ArrowLeft' || e.code === 'KeyD' || e.code === 'ArrowRight') {
         this.turnJustPressed = false;
       } else if (e.code === 'Space' || e.code === 'Enter') {
-        this.actionPressed = false;
+        new ActionJumpCommand(this, false).execute();
       }
     });
 
@@ -166,16 +178,12 @@ export class Player {
       if (this.isGameOver) return;
       if (this.touchOnly) return;
       if (isUiClick(e.target)) return;
-      audio.init();
-      if (!this.actionPressed) {
-        this.actionJustPressed = true;
-      }
-      this.actionPressed = true;
+      new ActionJumpCommand(this, true).execute();
     });
     window.addEventListener('mouseup', (e) => {
       if (e.button !== 0) return;
       if (this.touchOnly) return;
-      this.actionPressed = false;
+      new ActionJumpCommand(this, false).execute();
     });
     const btnFwd = document.getElementById('btn-forward');
     const btnBwd = document.getElementById('btn-backward');
@@ -212,35 +220,31 @@ export class Player {
       });
     }
 
-    const bindDirectionButton = (button, direction) => {
+    const bindDirectionButton = (button, CommandClass) => {
       if (!button) return;
-      const setPressed = (pressed, event) => {
-        event?.preventDefault();
-        this[direction] = pressed;
-      };
       button.addEventListener('pointerdown', (e) => {
         button.setPointerCapture?.(e.pointerId);
-        setPressed(true, e);
+        new CommandClass(this, true).execute();
       });
       ['pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave'].forEach((eventName) => {
-        button.addEventListener(eventName, (e) => setPressed(false, e));
+        button.addEventListener(eventName, () => {
+          new CommandClass(this, false).execute();
+        });
       });
     };
 
-    bindDirectionButton(btnFwd, 'moveForward');
-    bindDirectionButton(btnBwd, 'moveBackward');
+    bindDirectionButton(btnFwd, MoveForwardCommand);
+    bindDirectionButton(btnBwd, MoveBackwardCommand);
     if (btnAct) {
       btnAct.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         btnAct.setPointerCapture?.(e.pointerId);
-        audio.init();
-        this.actionJustPressed = true;
-        this.actionPressed = true;
+        new ActionJumpCommand(this, true).execute();
       });
       ['pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave'].forEach((eventName) => {
         btnAct.addEventListener(eventName, (e) => {
           e.preventDefault();
-          this.actionPressed = false;
+          new ActionJumpCommand(this, false).execute();
         });
       });
     }
@@ -248,8 +252,7 @@ export class Player {
     if (btnTurn) {
       btnTurn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
-        audio.init();
-        this.targetRotY = this.targetRotY === 0 ? Math.PI : 0;
+        new TurnAroundCommand(this).execute();
       });
     }
   }
@@ -281,14 +284,12 @@ export class Player {
     this.padBackward = pressed(13) || axisY > 0.4;
     const actionHeld = pressed(0) || pressed(1) || pressed(7) || pressed(5);
     if (actionHeld && !this.padPrevAction) {
-      audio.init();
-      this.actionJustPressed = true;
+      new ActionJumpCommand(this, true).execute();
     }
     this.padPrevAction = actionHeld;
     const turnHeld = pressed(2) || pressed(3) || pressed(4) || pressed(14) || pressed(15);
     if (turnHeld && !this.padPrevTurn) {
-      audio.init();
-      this.targetRotY = this.targetRotY === 0 ? Math.PI : 0;
+      new TurnAroundCommand(this).execute();
     }
     this.padPrevTurn = turnHeld;
   }
@@ -925,42 +926,7 @@ export class Player {
 
   // Automatic vine grab when close in distance (only mid-air: must JUMP)
   checkVineGrab(world) {
-    if (this.justReleasedVineTimer > 0) return;
-    // Standing still on the ground never grabs: the vine hangs high on purpose.
-    if (this.isGrounded) return;
-    // In the tunnel there are no vines within reach.
-    if (this.inTunnel || this.y < -2) return;
-    const tipPos = new THREE.Vector3();
-
-    for (const vineData of world.activeVines) {
-      if (!vineData.vine.tip) continue;
-      // Never re-grab the vine just released (only cleared on landing
-      // or grabbing another vine): keeps the flight gap to the next vine.
-      if (vineData === this.ignoredVine) continue;
-      vineData.vine.tip.getWorldPosition(tipPos);
-
-      // Distance check between player hands/chest and vine tip
-      const distZ = Math.abs(this.z - tipPos.z);
-      const distY = Math.abs((this.y + EYE_HEIGHT) - tipPos.y);
-
-      // Grab automatically when near the vine (generous Z window to
-      // compensate for the fast tip swing)!
-      if (distZ < 2.2 && distY < 2.4) {
-        this.attachedVine = vineData;
-        this.ignoredVine = null;
-        this.isGrounded = false;
-        this.vy = 0;
-        this.vz = 0;
-        audio.playTarzanYell();
-
-        // Show HUD prompt (only with on-screen help enabled)
-        if (getShowHelp()) {
-          const prompt = document.getElementById('vine-prompt');
-          if (prompt) prompt.classList.add('active');
-        }
-        break;
-      }
-    }
+    return new VineGrabCommand(this, world).execute();
   }
 
   // Update position while swinging on the vine
@@ -998,151 +964,16 @@ export class Player {
     }
   }
 
-  // Vine-to-vine transfer: pressing jump while another vine's tip is right
-  // there swings straight onto it (no flight in between). Returns true when
-  // the transfer happened.
   tryVineTransfer(world) {
-    if (!world || !world.activeVines) return false;
-    const tipPos = new THREE.Vector3();
-    let best = null;
-    let bestDist = Infinity;
-    for (const vineData of world.activeVines) {
-      if (vineData === this.attachedVine) continue;
-      // The vine just released does not count (otherwise the jump would never truly let go);
-      // any OTHER nearby vine is the "next vine".
-      if (vineData === this.ignoredVine) continue;
-      if (!vineData.vine.tip) continue;
-      vineData.vine.tip.getWorldPosition(tipPos);
-      const distZ = Math.abs(this.z - tipPos.z);
-      const distY = Math.abs((this.y + EYE_HEIGHT) - tipPos.y);
-      if (distZ < 3.5 && distY < 3.0) {
-        const d = distZ + distY;
-        if (d < bestDist) {
-          bestDist = d;
-          best = vineData;
-        }
-      }
-    }
-    if (!best) return false;
-    this.ignoredVine = this.attachedVine;
-    this.attachedVine = best;
-    this.vy = 0;
-    this.vz = 0;
-    audio.playTarzanYell();
-    return true;
+    return new VineTransferCommand(this, world).execute();
   }
 
-  // Release vine with swing momentum
   releaseVine() {
-    const v = this.attachedVine.vine;
-    // Calculate tangential swing velocity: d(tipZ)/dt = -L * cos(angle) * omega
-    const omega = v.maxAngle * v.speed * Math.cos(this.attachedVine.time);
-    const swingVz = -v.length * Math.cos(v.angle) * omega;
-
-    // Launch player forward/backward based on swing velocity
-    if (swingVz < 0) {
-      // Swinging forward: give healthy forward arc to clear pit easily
-      this.vz = Math.min(swingVz * 1.3, -11.0);
-    } else {
-      this.vz = THREE.MathUtils.clamp(swingVz * 1.2, -16, 16);
-    }
-    this.vy = 5.2; // nice jumping arc
-    this.isGrounded = false;
-    // Short re-grab lockout: long enough to clear the released vine's tip
-    // (~3.8m away at 11 m/s), short enough to allow vine-to-vine mid-air
-    // transfers on the double-vine crocodile screens.
-    this.justReleasedVineTimer = 0.35;
-    // Open croc mouths cannot kill for a short while: time to clear the last
-    // crocodile and land back on the track even if its mouth is open.
-    this.crocBiteGraceTimer = CROC_BITE_GRACE_DURATION;
-    // The released vine stays ignored until landing: the post-release flight never
-    // re-grabs the SAME vine, only the next one.
-    this.ignoredVine = this.attachedVine;
-    this.attachedVine = null;
-    // Hands off the vine: hide the grip bar right away.
-    if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
-
-    audio.playRelease();
-
-    // Hide HUD prompt
-    const prompt = document.getElementById('vine-prompt');
-    if (prompt) prompt.classList.remove('active');
+    new VineReleaseCommand(this).execute();
   }
 
-  // Check collision with hazards and collectibles
   checkCollisions(world) {
-    // 1. Logs (Stationary & Rolling)
-    for (const hazard of world.activeHazards) {
-      if (hazard.type === 'log' || hazard.type === 'rolling_log') {
-        if (DEBUG_GOD_MODE) continue;
-        // Log falling from the sky, in the pit, or waiting its turn (invisible) — no collision
-        if (hazard.falling || hazard.fallingIntoPit || hazard.waiting) continue;
-        const distZ = Math.abs(this.z - hazard.z);
-        // Surface log doesn't hit the player 8m below in the tunnel
-        if (Math.abs(this.y - 0.45) > 3) continue;
-        // When over a pit (vine swing, jumping across lakes/crocs/quicksand/shafts), log hitbox is disabled
-        if (this.isOverPit(world)) continue;
-        // If close and not jumping high enough
-        if (distZ < 1.0 && this.y < 0.75) {
-          if (this.tripCooldown <= 0) {
-            this.tripCooldown = 1.0;
-            this.isTripped = true;
-            this.trippingHazard = hazard;
-            this.tripStandTimer = 0;
-            this.score = Math.max(0, this.score - 100);
-            audio.playTrip();
-            // Stop forward/backward speed while kneeling
-            this.vz = 0;
-          }
-        }
-      } else if (hazard.type === 'fire') {
-        if (DEBUG_GOD_MODE) continue;
-        // Campfire: deadly if walking into it without jumping (same level only)
-        const distZ = Math.abs(this.z - hazard.z);
-        if (distZ < 1.1 && Math.abs(this.y) < 0.9) {
-          audio.playTrip();
-          this.die('death.fire');
-          return;
-        }
-      } else if (hazard.type === 'snake') {
-        if (DEBUG_GOD_MODE) continue;
-        const distZ = Math.abs(this.z - hazard.z);
-        if (distZ < 1.1 && Math.abs(this.y) < 0.9) {
-          audio.playTrip();
-          this.die('death.snake');
-          return;
-        }
-      } else if (hazard.type === 'scorpion') {
-        if (DEBUG_GOD_MODE) continue;
-        // Scorpion: deadly if touching without jumping (same level only)
-        const distZ = Math.abs(this.z - hazard.z);
-        const hy = hazard.baseY ?? 0.08;
-        if (distZ < 1.1 && Math.abs(this.y - hy) < 0.9) {
-          audio.playTrip();
-          this.die('death.scorpion');
-          return;
-        }
-      }
-    }
-
-    // 2. Treasures
-    for (const treasure of world.activeTreasures) {
-      if (!treasure.collected) {
-        const distZ = Math.abs(this.z - treasure.z);
-        // Only collect on the same level (not through the floor to the tunnel)
-        if (distZ < 1.4 && Math.abs(this.y - treasure.mesh.position.y) < 2) {
-          treasure.collected = true;
-          // The treasure belongs to the screen group, not directly to the scene.
-          treasure.mesh.removeFromParent();
-          // Authentic treasureBits: mark the (phase, kind) slot as claimed so it
-          // never respawns on revisits (world.resetRun() clears it on restart).
-          world.claimTreasureSlot(treasure);
-          this.score += treasure.points;
-          this.treasuresCollected++;
-          audio.playTreasure();
-        }
-      }
-    }
+    return new CheckCollisionsCommand(this, world).execute();
   }
 
   // Arms and First-Person Camera Motion
@@ -1243,278 +1074,18 @@ export class Player {
   }
 
   die(reasonKey = 'death.lifeLost') {
-    if (this.isDying || this.isGameOver) return;
-    this.isDying = true;
-    
-    if (DEBUG_GOD_MODE) {
-      // In God Mode, just respawn quickly without losing lives
-      this.deathTimer = 0.5;
-    } else {
-      this.deathTimer = 1.2;
-      this.lives--;
-    }
-    
-    this.deathReasonKey = reasonKey;
-    this.diedInTunnel = this.inTunnel;
-    this.crocBiteGraceTimer = 0;
-    this.warp = null;
-
-    // Fade to black on death
-    const fade = document.getElementById('death-fade');
-    if (fade) fade.classList.add('on');
-
-    // Detach from vine if attached
-    if (this.attachedVine) {
-      this.attachedVine = null;
-      this.ignoredVine = null;
-      if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
-      const prompt = document.getElementById('vine-prompt');
-      if (prompt) prompt.classList.remove('active');
-    }
-
-    if (this.lives <= 0) {
-      this.lives = 0;
-      this.isGameOver = true;
-      audio.playGameOver();
-      setTimeout(() => {
-        this.triggerGameOver();
-      }, 1000);
-    } else {
-      audio.playLifeLost();
-    }
-  }
-
-  // Safe ground check for respawn (pure, no side-effects: never calls die()).
-  // Returns false over water / tar / log-exit pit / ladder shaft / opening quicksand.
-  isRespawnGroundSafe(world, z) {
-    for (const hazard of world.activeHazards) {
-      if (['quicksand', 'tarpit', 'water', 'ladder_shaft'].includes(hazard.type)) {
-        if (z <= hazard.maxZ && z >= hazard.minZ) return false;
-      } else if (hazard.type === 'log_exit_pit') {
-        if (z >= hazard.minZ - 1 && z <= hazard.maxZ + 1) return false;
-      }
-    }
-    if (world.activeOpeningPits) {
-      for (const pitData of world.activeOpeningPits) {
-        if (Math.abs(z - pitData.z) < pitData.radius + 1) return false;
-      }
-    }
-    return true;
-  }
-
-  // Minimum clearance from physical hazards (stationary/rolling logs, fire, scorpion).
-  isRespawnClearOfHazards(world, z) {
-    for (const hazard of world.activeHazards) {
-      // Hazard on a different level (tunnel scorpion) doesn't block surface respawn
-      const hy = hazard.baseY ?? 0;
-      if (Math.abs(hy) > 3) continue;
-      if (hazard.type === 'rolling_log') {
-        if (Math.abs(z - hazard.z) < 4.0) return false;
-      } else if (hazard.type === 'log' || hazard.type === 'fire' || hazard.type === 'scorpion' || hazard.type === 'snake') {
-        if (Math.abs(z - hazard.z) < 2.8) return false;
-      }
-    }
-    return true;
-  }
-
-  // Tunnel respawn clearance: away from patrolling scorpions and brick dead-ends.
-  isTunnelRespawnClear(world, z) {
-    for (const hazard of world.activeHazards) {
-      if (hazard.type === 'scorpion') {
-        const hz = hazard.mesh ? hazard.mesh.position.z : hazard.baseZ;
-        if (Math.abs(z - hz) < 4) return false;
-      }
-    }
-    if (world.activeTunnelWalls) {
-      for (const wl of world.activeTunnelWalls) {
-        if (Math.abs(z - wl.z) < 2.5) return false;
-      }
-    }
-    return true;
-  }
-
-  // Find a safe tunnel Z near the death spot.
-  findSafeTunnelRespawnZ(world, baseZ) {
-    const candidates = [baseZ, baseZ - 4, baseZ + 4, baseZ - 8, baseZ + 8,
-      baseZ - 12, baseZ + 12];
-    for (const c of candidates) {
-      if (this.isTunnelRespawnClear(world, c)) return c;
-    }
-    return baseZ;
-  }
-
-  // Find a safe Z near the base: never under a falling log drop point.
-  findSafeRespawnZ(world, baseZ, screenIndex) {
-    const screenStartZ = -screenIndex * SCREEN_LENGTH;
-    const screenEndZ = -(screenIndex + 1) * SCREEN_LENGTH;
-    const minZ = screenEndZ + 2;
-    const maxZ = screenStartZ + 10;
-    const candidates = [baseZ, baseZ - 4, baseZ + 4, baseZ - 8, baseZ + 8,
-      baseZ - 12, baseZ + 12, baseZ - 16, baseZ + 16, baseZ - 20, baseZ + 20];
-    for (const c of candidates) {
-      const z = THREE.MathUtils.clamp(c, minZ, maxZ);
-      if (this.isRespawnGroundSafe(world, z) && this.isRespawnClearOfHazards(world, z)) {
-        return z;
-      }
-    }
-    // Fallback: stay at base even if everything is occupied (prevents game lockup).
-    return THREE.MathUtils.clamp(baseZ, minZ, maxZ);
+    new DieCommand(this, reasonKey).execute();
   }
 
   respawn(world = null) {
-    this.isDying = false;
-    // Fade in on respawn
-    const fade = document.getElementById('death-fade');
-    if (fade) fade.classList.remove('on');
-    this.vy = 0;
-    this.vz = 0;
-    this.isGrounded = false;
-    this.isTripped = false;
-    this.tripStandTimer = 0;
-    this.tripCooldown = 0;
-    // Scorpion death underground: respawn stays in the tunnel.
-    // Everything else respawns on the surface.
-    const tunnelRespawn = !!(world && this.deathReasonKey === 'death.scorpion' && this.diedInTunnel);
-    this.diedInTunnel = false;
-    this.inTunnel = tunnelRespawn;
-    this.climbing = null;
-    this.climbGrace = 0;
-    this.crocBiteGraceTimer = 0;
-    this.warp = null;
-    this.camera.fov = this.baseFov;
-    this.camera.updateProjectionMatrix();
-    // Deactivate the tunnel corridor walls and scorpion on any surface respawn
-    if (!tunnelRespawn && world) world.deactivateTunnelCorridor();
-
-    // Respawn at the last checkpoint (last boundary strip crossed); if no checkpoint,
-    // at the start of the screen where the player died (forward = -Z, start = +Z edge).
-    if (world) {
-      if (tunnelRespawn) {
-        this.z = this.findSafeTunnelRespawnZ(world, this.z);
-      } else {
-        let baseZ;
-        if (this.checkpointZ !== null) {
-          baseZ = this.checkpointZ;
-        } else {
-          const screenIndex = Math.floor(-this.z / SCREEN_LENGTH);
-          baseZ = -screenIndex * SCREEN_LENGTH + 6;
-        }
-        const screenIndex = Math.floor(-baseZ / SCREEN_LENGTH);
-        // Steer clear of logs and other hazards: never spawns under a falling log
-        // or on top of a pit / opening quicksand.
-        this.z = this.findSafeRespawnZ(world, baseZ, screenIndex);
-      }
-    } else {
-      // Fallback: move back 8 units
-      this.z += 8;
-    }
-    if (tunnelRespawn) {
-      // Back on the tunnel floor directly: no sky fall underground.
-      this.y = TUNNEL_FLOOR_Y;
-      this.vy = 0;
-      this.isGrounded = true;
-      this.respawnDrop = false;
-    } else {
-      // Drop from the sky like the original: spawns high up and gravity does the rest.
-      this.y = this.RESPAWN_DROP_HEIGHT;
-      this.isGrounded = false;
-      this.respawnDrop = true;
-    }
-    // Keep the facing direction from before death (no forced turn-around).
-    if (this.targetRotY === undefined) this.targetRotY = 0;
-    this.camera.rotation.y = this.targetRotY;
-    this.camera.position.set(0, this.y + EYE_HEIGHT, this.z);
+    new RespawnCommand(this, world).execute();
   }
 
   triggerGameOver() {
-    const overlay = document.getElementById('gameover-overlay');
-    const reasonText = document.getElementById('gameover-reason');
-    const finalScore = document.getElementById('final-score');
-    const finalScreens = document.getElementById('final-screens');
-    const finalTreasures = document.getElementById('final-treasures');
-    const newRecordEl = document.getElementById('new-record');
-    const finalHighscore = document.getElementById('final-highscore');
-
-    // High score persisted in the browser (only recorded at game over — arcade standard)
-    const isNewRecord = submitScore(this.score);
-
-    if (overlay) overlay.classList.remove('hidden');
-    if (reasonText) reasonText.textContent = t(this.deathReasonKey || 'death.lifeLost');
-    if (newRecordEl) newRecordEl.classList.toggle('hidden', !isNewRecord);
-    if (finalHighscore) finalHighscore.textContent = String(getHighScore()).padStart(6, '0');
-    if (finalScore) finalScore.textContent = String(this.score).padStart(6, '0');
-    if (finalScreens) finalScreens.textContent = Math.floor(Math.abs(this.z) / 60) + 1;
-    if (finalTreasures) finalTreasures.textContent = `${this.treasuresCollected}`;
-
-    // Focus first button on the game over screen for keyboard/gamepad navigation
-    const restartBtn = document.getElementById('restart-btn');
-    if (restartBtn) {
-      restartBtn.focus();
-      restartBtn.classList.add('menu-focus');
-    }
+    new GameOverCommand(this).execute();
   }
 
   reset() {
-    this.z = 0;
-    this.y = 0;
-    this.vy = 0;
-    this.vz = 0;
-    this.targetRotY = 0;
-    this.camera.rotation.y = 0;
-    this.camera.rotation.x = -0.04;
-    this.camera.rotation.z = 0;
-    this.camera.position.set(0, EYE_HEIGHT, 0);
-    this.isGrounded = true;
-    this.moveForward = false;
-    this.moveBackward = false;
-    this.actionPressed = false;
-    this.actionJustPressed = false;
-    this.turnJustPressed = false;
-    this.padForward = false;
-    this.padBackward = false;
-    this.padPrevAction = false;
-    this.padPrevTurn = false;
-    this.score = 2000;
-    this.lives = 3;
-    this.timeRemaining = 1200;
-    this.treasuresCollected = 0;
-    this.isGameOver = false;
-    this.isDying = false;
-    this.deathTimer = 0;
-    this.deathReasonKey = 'death.lifeLost';
-    this.diedInTunnel = false;
-    this.ceilDeathKey = 'death.cave';
-    this.attachedVine = null;
-    this.ignoredVine = null;
-    this.justReleasedVineTimer = 0;
-    this.crocBiteGraceTimer = 0;
-    if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
-    this.tripCooldown = 0;
-    this.isTripped = false;
-    this.tripStandTimer = 0;
-    this.respawnDrop = false;
-    // Surface restart: clear any underground state left over from the
-    // previous run (otherwise getSurfaceElevation keeps returning the
-    // tunnel floor and Harry falls through the trail on frame one).
-    this.inTunnel = false;
-    this.climbing = null;
-    this.climbZ = 0;
-    this.climbGrace = 0;
-    this.warp = null;
-    this.camera.fov = this.baseFov;
-    this.camera.updateProjectionMatrix();
-    this.checkpointZ = null;
-    this.lastSurfaceHoleScreen = null;
-    this.bobTimer = 0;
-    this.lastBobSin = 0;
-
-    const prompt = document.getElementById('vine-prompt');
-    if (prompt) prompt.classList.remove('active');
-
-    const overlay = document.getElementById('gameover-overlay');
-    if (overlay) overlay.classList.add('hidden');
-
-    const fade = document.getElementById('death-fade');
-    if (fade) fade.classList.remove('on');
+    new ResetCommand(this).execute();
   }
 }

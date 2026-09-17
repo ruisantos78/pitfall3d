@@ -5,7 +5,9 @@ import { audio } from './audio.js';
 import { World, SCREEN_LENGTH } from './world.js';
 import { Player } from './player.js';
 import { HUD } from './hud.js';
-import { t, getLanguage, setLanguage, getShowHelp, setShowHelp, getHighScore, applyStaticTexts } from './i18n.js';
+import { t, applyStaticTexts } from './i18n.js';
+import { getLanguage, setLanguage, getShowHelp, setShowHelp, getHighScore } from './settings.js';
+import { MenuNavigateCommand, MenuSelectCommand, MenuBackCommand } from './commands/index.js';
 // Re-export the shared debug switch for existing developer tooling.
 export { DEBUG_GOD_MODE } from './debug.js';
 
@@ -219,13 +221,13 @@ class Game {
       if (isUp || isDown || isLeft || isRight) {
         e.preventDefault();
         const dir = (isUp || isLeft) ? -1 : 1;
-        this.navigateMenu(dir);
+        new MenuNavigateCommand(this, dir).execute();
         return;
       }
 
       if (isConfirm) {
         e.preventDefault();
-        this.activateMenuSelected();
+        new MenuSelectCommand(this).execute();
         return;
       }
 
@@ -233,7 +235,8 @@ class Game {
         const menuOptionsEl = document.getElementById('menu-options');
         if (menuOptionsEl && !menuOptionsEl.classList.contains('hidden')) {
           e.preventDefault();
-          showOptions(false);
+          const optionsBackBtn = document.getElementById('options-back-btn');
+          new MenuBackCommand(optionsBackBtn).execute();
         }
       }
     });
@@ -388,14 +391,14 @@ class Game {
     const navHeld = navUp || navDown || navLeft || navRight;
     if (navHeld && !this.padNavPrev) {
       const dir = (navUp || navLeft) ? -1 : 1;
-      this.navigateMenu(dir);
+      new MenuNavigateCommand(this, dir).execute();
     }
     this.padNavPrev = navHeld;
 
     // A button (0) or Start button (9) activates selected option
     const confirmHeld = pressed(0) || pressed(9);
     if (confirmHeld && !this.padMenuPrev) {
-      this.activateMenuSelected();
+      new MenuSelectCommand(this).execute();
     }
     this.padMenuPrev = confirmHeld;
 
@@ -405,7 +408,7 @@ class Game {
       const optionsBackBtn = document.getElementById('options-back-btn');
       const menuOptionsEl = document.getElementById('menu-options');
       if (optionsBackBtn && menuOptionsEl && !menuOptionsEl.classList.contains('hidden')) {
-        optionsBackBtn.click();
+        new MenuBackCommand(optionsBackBtn).execute();
       }
     }
     this.padBackPrev = backHeld;
