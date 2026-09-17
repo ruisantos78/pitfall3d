@@ -21,28 +21,38 @@ import {
   CheckCollisionsCommand,
 } from './commands/index.js';
 
-export const GRAVITY = 28.0;
-export const JUMP_VELOCITY = 10.5;
-export const RUN_SPEED = 9.0;
-export const EYE_HEIGHT = 2.2;
-// Underground shortcut pace: ladder/scorpion screens walk at normal surface
-// pace (jumping stays enabled — it is the only way past scorpions).
-export const TUNNEL_SPEED_MULT = 1.0;
-// Empty underground screens have no ladder or scorpion to negotiate, so Harry
-// sprints through them at 6x, braking smoothly into the next 1x screen.
-export const EMPTY_TUNNEL_SPEED_MULT = 6.0;
-// Planned braking decel (m/s^2) capping the 6x cruise by distance to the
-// next ladder/scorpion screen: ~41m of smooth slowdown from 54 to 9 m/s.
-export const TUNNEL_BRAKE_DECEL = 35.0;
-// Animated warp through empty tunnel screens: top speed, stop margin before
-// the next ladder/scorpion screen edge, and min trip length to engage.
-export const WARP_SPEED = 60.0;
-export const WARP_STOP_MARGIN = 6.0;
-export const WARP_MIN_DIST = 25.0;
-export const WARP_FOV = 95.0;
-// Grace period after releasing a vine during which an open crocodile mouth
-// cannot kill (enough time to clear the last croc and land back on track).
-export const CROC_BITE_GRACE_DURATION = 1.0;
+// Physics constants live in ./player/constants.js (single source of truth);
+// re-exported here so existing `from './player.js'` imports keep working.
+export {
+  GRAVITY,
+  JUMP_VELOCITY,
+  RUN_SPEED,
+  EYE_HEIGHT,
+  TUNNEL_SPEED_MULT,
+  EMPTY_TUNNEL_SPEED_MULT,
+  TUNNEL_BRAKE_DECEL,
+  WARP_SPEED,
+  WARP_STOP_MARGIN,
+  WARP_MIN_DIST,
+  WARP_FOV,
+  CROC_BITE_GRACE_DURATION,
+} from './player/constants.js';
+import {
+  GRAVITY,
+  JUMP_VELOCITY,
+  RUN_SPEED,
+  EYE_HEIGHT,
+  TUNNEL_SPEED_MULT,
+  EMPTY_TUNNEL_SPEED_MULT,
+  TUNNEL_BRAKE_DECEL,
+  WARP_SPEED,
+  WARP_STOP_MARGIN,
+  WARP_MIN_DIST,
+} from './player/constants.js';
+import { updateArmsAndCamera } from './player/camera.js';
+
+// Scratch vector for the vine-tip lookup (avoids one allocation per frame).
+const _vineTip = new THREE.Vector3();
 
 export class Player {
   constructor(camera, scene) {
@@ -932,8 +942,7 @@ export class Player {
   // Update position while swinging on the vine
   updateAttachedVine(delta, world) {
     const v = this.attachedVine.vine;
-    const tipPos = new THREE.Vector3();
-    v.tip.getWorldPosition(tipPos);
+    const tipPos = v.tip.getWorldPosition(_vineTip);
 
     this.z = tipPos.z;
     this.y = Math.max(0, tipPos.y - EYE_HEIGHT);
@@ -976,101 +985,9 @@ export class Player {
     return new CheckCollisionsCommand(this, world).execute();
   }
 
-  // Arms and First-Person Camera Motion
+  // Arms and First-Person Camera Motion (see ./player/camera.js)
   updateArmsAndCamera(delta) {
-    const isMoving = Math.abs(this.vz) > 0.5;
-    const isTripped = this.isTripped;
-
-    // Off the vine: hide the grip bar (only shown while swinging).
-    if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
-
-    // Kneeling: player drops to knees as in the original Atari 2600 while log rolls by
-    if (isTripped) {
-      // Lower camera to kneeling height (~1.2m above feet)
-      const targetY = this.y + 1.2;
-      this.camera.position.set(0, THREE.MathUtils.lerp(this.camera.position.y, targetY, delta * 10), this.z);
-      // Slight natural tilt down, maintaining player facing direction (targetRotY)
-      this.camera.rotation.x = THREE.MathUtils.lerp(this.camera.rotation.x, -0.15, delta * 10);
-      this.camera.rotation.z = 0;
-      this.camera.rotation.y = THREE.MathUtils.lerp(this.camera.rotation.y, this.targetRotY, delta * 15);
-      if (this.arms) {
-        // Arms rested on knees / bracing slightly
-        this.arms.leftArm.position.set(-0.3, -0.25, -0.5);
-        this.arms.rightArm.position.set(0.3, -0.25, -0.5);
-        this.arms.leftArm.rotation.x = Math.PI / 4;
-        this.arms.rightArm.rotation.x = Math.PI / 4;
-      }
-      return;
-    }
-
-    // Head bobbing calculation
-    let bobY = 0;
-    let bobPitch = 0;
-
-    if (isMoving && this.isGrounded) {
-      this.bobTimer += delta * 12;
-      bobY = Math.sin(this.bobTimer) * 0.05;
-      bobPitch = Math.sin(this.bobTimer) * 0.015;
-
-      // Footstep on every stride (each zero crossing of the bob cycle).
-      const bobSin = Math.sin(this.bobTimer);
-      if (
-        this.lastBobSin !== undefined &&
-        ((this.lastBobSin >= 0 && bobSin < 0) || (this.lastBobSin < 0 && bobSin >= 0))
-      ) {
-        audio.playStep();
-      }
-      this.lastBobSin = bobSin;
-    } else {
-      this.bobTimer = 0;
-      this.lastBobSin = 0;
-    }
-
-    // Warp stretch: widen the FOV while dashing, ease it back after.
-    const targetFov = this.warp ? WARP_FOV : this.baseFov;
-    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
-      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, delta * (this.warp ? 3 : 5)));
-      this.camera.updateProjectionMatrix();
-    }
-
-    // Camera position & rotation (slight natural tilt towards the trail ahead)
-    const targetCameraY = this.y + EYE_HEIGHT + bobY;
-    this.camera.position.set(0, THREE.MathUtils.lerp(this.camera.position.y, targetCameraY, delta * 12), this.z);
-    this.camera.rotation.x = THREE.MathUtils.lerp(this.camera.rotation.x, -0.04 + bobPitch, delta * 12);
-    this.camera.rotation.z = 0;
-
-    // Ensure targetRotY is initialized
-    if (this.targetRotY === undefined) {
-      this.targetRotY = 0;
-    }
-
-    // Smooth 180 degree spin
-    this.camera.rotation.y = THREE.MathUtils.lerp(this.camera.rotation.y, this.targetRotY, delta * 15);
-
-    // Arms animations
-    if (this.arms) {
-      if (!this.isGrounded) {
-        // Arms raised slightly in jump
-        this.arms.leftArm.position.set(-0.35, -0.15, -0.55);
-        this.arms.rightArm.position.set(0.35, -0.15, -0.55);
-        this.arms.leftArm.rotation.x = Math.PI / 3;
-        this.arms.rightArm.rotation.x = Math.PI / 3;
-      } else if (isMoving) {
-        // Running arm swing
-        const armSwing = Math.sin(this.bobTimer) * 0.35;
-        this.arms.leftArm.position.set(-0.35, -0.3 + bobY, -0.6);
-        this.arms.rightArm.position.set(0.35, -0.3 + bobY, -0.6);
-        this.arms.leftArm.rotation.x = Math.PI / 4 + armSwing;
-        this.arms.rightArm.rotation.x = Math.PI / 4 - armSwing;
-      } else {
-        // Idle breathing
-        const breathe = Math.sin(Date.now() * 0.003) * 0.015;
-        this.arms.leftArm.position.set(-0.35, -0.3 + breathe, -0.6);
-        this.arms.rightArm.position.set(0.35, -0.3 + breathe, -0.6);
-        this.arms.leftArm.rotation.x = Math.PI / 4;
-        this.arms.rightArm.rotation.x = Math.PI / 4;
-      }
-    }
+    updateArmsAndCamera(this, delta);
   }
 
   die(reasonKey = 'death.lifeLost') {

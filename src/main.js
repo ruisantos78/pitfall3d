@@ -58,6 +58,16 @@ class Game {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
+    // Adaptive quality (GPU relief): if the frame rate sags, the renderer
+    // steps down pixel ratio and shadow resolution instead of melting the
+    // GPU. Steps only go down, never oscillate back up mid-run.
+    this.qualitySteps = coarse
+      ? [1.5, 1.25, 1.0, 0.85]
+      : [2.0, 1.5, 1.25, 1.0];
+    this.qualityLevel = 0;
+    this.qualityTimer = 0;
+    this.qualityFrames = 0;
+    this.shadowsDegraded = false;
 
     // 4. Lighting: soft jungle lighting
     const ambientLight = new THREE.AmbientLight(0xd8ecd0, 1.0);
@@ -92,8 +102,10 @@ class Game {
     this.world = new World(this.scene);
     this.player = new Player(this.camera, this.scene);
 
-    // Pre-generate initial screens (Screen 0, 1, 2) synchronously behind the menu
-    for (let i = 0; i <= 2; i++) this.world.getOrCreateScreen(i);
+    // Progressive boot: screen 0 builds synchronously (visible behind the
+    // menu) while screens 1-2 build in idle time, keeping first paint fast.
+    this.world.getOrCreateScreen(0);
+    this.world.prefetchScreensIdle([1, 2]);
   }
 
   initHUD() {
@@ -454,6 +466,34 @@ class Game {
       this.sunLight.position.set(15, 30, this.player.z + 20);
       this.sunLight.target.position.set(0, 0, this.player.z);
       this.sunLight.target.updateMatrixWorld();
+    }
+
+    // Adaptive quality: evaluate average FPS every ~2s while running and
+    // step the pixel ratio down when the GPU cannot keep up.
+    if (this.isRunning) {
+      this.qualityTimer += delta;
+      this.qualityFrames++;
+      if (this.qualityTimer >= 2) {
+        const fps = this.qualityFrames / this.qualityTimer;
+        this.qualityTimer = 0;
+        this.qualityFrames = 0;
+        if (fps < 45 && this.qualityLevel < this.qualitySteps.length - 1) {
+          this.qualityLevel++;
+          const dpr = Math.min(window.devicePixelRatio || 1, this.qualitySteps[this.qualityLevel]);
+          this.renderer.setPixelRatio(dpr);
+          if (this.qualityLevel >= 2 && !this.shadowsDegraded) {
+            this.shadowsDegraded = true;
+            this.sunLight.shadow.mapSize.set(1024, 1024);
+            if (this.sunLight.shadow.map) {
+              this.sunLight.shadow.map.dispose();
+              this.sunLight.shadow.map = null;
+            }
+          }
+          if (this.qualityLevel >= 3) {
+            this.renderer.shadowMap.enabled = false;
+          }
+        }
+      }
     }
 
     // Render 3D Scene

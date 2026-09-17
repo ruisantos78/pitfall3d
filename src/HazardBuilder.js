@@ -18,12 +18,40 @@ import {
   PIT_FLOOR_Y,
 } from './WorldConstants.js';
 
+// Shared GPU resources for the falling-log landing warning: a single canvas
+// texture upload reused by every rolling log (cloning a CanvasTexture per log
+// uploads a duplicate GPU texture each time).
+let sharedStripeTex = null;
+let sharedStripeGeo = null;
+
+function getSharedStripeTex() {
+  if (sharedStripeTex) return sharedStripeTex;
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffcc00';
+  ctx.fillRect(0, 0, 128, 128);
+  ctx.fillStyle = '#141414';
+  ctx.save();
+  ctx.translate(64, 64);
+  ctx.rotate(-Math.PI / 4);
+  for (let x = -128; x < 128; x += 32) {
+    ctx.fillRect(x, -128, 16, 256);
+  }
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  sharedStripeTex = tex;
+  return tex;
+}
+
 export class HazardBuilder {
   static ROLLING_CYCLE = 7.4;
 
   constructor(world) {
     this.world = world;
-    this.hazardStripeTex = null;
   }
 
   addStationaryLog(group, screenIndex, z) {
@@ -41,48 +69,28 @@ export class HazardBuilder {
     });
   }
 
-  makeHazardStripeTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffcc00';
-    ctx.fillRect(0, 0, 128, 128);
-    ctx.fillStyle = '#141414';
-    ctx.save();
-    ctx.translate(64, 64);
-    ctx.rotate(-Math.PI / 4);
-    for (let x = -128; x < 128; x += 32) {
-      ctx.fillRect(x, -128, 16, 256);
-    }
-    ctx.restore();
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    return tex;
-  }
-
   createFallingLogWarning(z) {
     const group = new THREE.Group();
-    if (!this.hazardStripeTex) {
-      this.hazardStripeTex = this.makeHazardStripeTexture();
+    // Shared texture + geometry: only the small material is per-log (it fades
+    // independently). The growth cue is conveyed via band scale, so no
+    // per-log texture repeat is needed.
+    if (!sharedStripeGeo) {
+      sharedStripeGeo = new THREE.PlaneGeometry(1, 1.8);
+      this.world.sharedGeometries.add(sharedStripeGeo);
     }
-    const tex = this.hazardStripeTex.clone();
-    tex.needsUpdate = true;
-
     const bandMat = new THREE.MeshBasicMaterial({
-      map: tex,
+      map: getSharedStripeTex(),
       transparent: true,
       opacity: 0.8,
       depthWrite: false,
     });
-    const band = new THREE.Mesh(new THREE.PlaneGeometry(1, 1.8), bandMat);
+    const band = new THREE.Mesh(sharedStripeGeo, bandMat);
     band.rotation.x = -Math.PI / 2;
     band.position.y = 0.02;
     group.add(band);
 
     group.position.set(0, 0, z);
-    return { group, band, bandMat, tex };
+    return { group, band, bandMat, tex: null };
   }
 
   rollingDropZ(endZ) {

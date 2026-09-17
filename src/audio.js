@@ -10,6 +10,12 @@ class RetroAudio {
     this.ctx = null;
     this.enabled = true;
     this.ambientTimer = null;
+    // Cached 1s white-noise buffer reused by every playNoise call (avoids a
+    // per-call buffer allocation plus a full sample-rate fill loop).
+    this._noiseBuffer = null;
+    // Global throttle for the rolling-log proximity tick: several logs can
+    // request a knock on the same frame, but one oscillator is enough.
+    this._lastKnockAt = 0;
   }
 
   init() {
@@ -258,6 +264,9 @@ class RetroAudio {
   playWoodKnock(volume = 0.2) {
     if (!this.enabled) return;
     this.init();
+    const nowMs = performance.now();
+    if (nowMs - this._lastKnockAt < 70) return;
+    this._lastKnockAt = nowMs;
     const now = this.ctx.currentTime;
 
     const osc = this.ctx.createOscillator();
@@ -330,18 +339,24 @@ class RetroAudio {
     osc.stop(now + 0.14);
   }
 
-  // Noise generator for crunches/splashes
+  // Noise generator for crunches/splashes (shares one cached buffer; each
+  // call only needs a lightweight BufferSource pointing at an offset).
   playNoise(duration, volume, startTime) {
     if (!this.ctx) return;
-    const bufferSize = this.ctx.sampleRate * duration;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
+    if (!this._noiseBuffer) {
+      const len = this.ctx.sampleRate; // 1s of white noise, reused
+      this._noiseBuffer = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const data = this._noiseBuffer.getChannelData(0);
+      for (let i = 0; i < len; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
     }
 
     const noise = this.ctx.createBufferSource();
-    noise.buffer = buffer;
+    noise.buffer = this._noiseBuffer;
+    noise.loop = true;
+    // Randomize the start offset so repeated hits don't sound identical.
+    const offset = Math.random() * Math.max(0, 1 - duration);
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
@@ -355,7 +370,7 @@ class RetroAudio {
     filter.connect(gain);
     gain.connect(this.ctx.destination);
 
-    noise.start(startTime);
+    noise.start(startTime, offset, duration);
     noise.stop(startTime + duration);
   }
 

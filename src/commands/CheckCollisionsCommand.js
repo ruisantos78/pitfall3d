@@ -13,6 +13,13 @@ export class CheckCollisionsCommand extends Command {
     const p = this.player;
     const world = this.world;
 
+    // Hoisted pit check: isOverPit scans every hazard, so calling it inside
+    // the loop below made collision detection O(n^2) per frame.
+    const needsPitCheck = !DEBUG_GOD_MODE && Math.abs(p.y - 0.45) <= 3 &&
+      world.activeHazards.some((h) =>
+        h.type === 'log' || h.type === 'rolling_log');
+    const overPit = needsPitCheck ? p.isOverPit(world) : false;
+
     // 1. Logs (Stationary & Rolling)
     for (const hazard of world.activeHazards) {
       if (hazard.type === 'log' || hazard.type === 'rolling_log') {
@@ -20,7 +27,7 @@ export class CheckCollisionsCommand extends Command {
         if (hazard.falling || hazard.fallingIntoPit || hazard.waiting) continue;
         const distZ = Math.abs(p.z - hazard.z);
         if (Math.abs(p.y - 0.45) > 3) continue;
-        if (p.isOverPit(world)) continue;
+        if (overPit) continue;
         if (distZ < 1.0 && p.y < 0.75) {
           if (p.tripCooldown <= 0) {
             p.tripCooldown = 1.0;

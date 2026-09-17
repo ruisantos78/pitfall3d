@@ -23,6 +23,15 @@ export class HUD {
 
     this.crtEnabled = true;
     this.lastJumpCue = 0;
+    // Cached DOM values: HUD.update runs every frame, but DOM writes trigger
+    // style/layout work, so each field is only touched when its value changes.
+    this._lastScore = -1;
+    this._lastTimeText = '';
+    this._lastLives = -1;
+    this._lastScreen = -1;
+    this._lastTreasures = -1;
+    this._lastRecord = -1;
+    this._lastNorth = null;
     this.initControls();
   }
 
@@ -103,20 +112,26 @@ export class HUD {
       this.crocTextEl.style.fontSize = '';
       this.crocTextEl.style.color = '';
     }
-    // 1. Score
-    if (this.scoreEl) {
-      this.scoreEl.textContent = String(Math.max(0, player.score)).padStart(6, '0');
+    // 1. Score (only on change)
+    const score = Math.max(0, Math.floor(player.score));
+    if (this.scoreEl && score !== this._lastScore) {
+      this._lastScore = score;
+      this.scoreEl.textContent = String(score).padStart(6, '0');
     }
 
-    // 2. Timer (MM:SS)
+    // 2. Timer (MM:SS, only when the visible second changes)
     if (this.timerEl) {
-      const minutes = Math.floor(player.timeRemaining / 60);
-      const seconds = Math.floor(player.timeRemaining % 60);
-      this.timerEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+      const totalSec = Math.max(0, Math.ceil(player.timeRemaining));
+      const text = `${String(Math.floor(totalSec / 60)).padStart(2, '0')}:${String(totalSec % 60).padStart(2, '0')}`;
+      if (text !== this._lastTimeText) {
+        this._lastTimeText = text;
+        this.timerEl.textContent = text;
+      }
     }
 
-    // 3. Lives Icons
-    if (this.livesEl) {
+    // 3. Lives Icons (rebuild only when the count changes)
+    if (this.livesEl && player.lives !== this._lastLives) {
+      this._lastLives = player.lives;
       let iconsHtml = '';
       for (let i = 0; i < player.lives; i++) {
         iconsHtml += '<span class="life-icon">▲</span>';
@@ -124,28 +139,38 @@ export class HUD {
       this.livesEl.innerHTML = iconsHtml;
     }
 
-    // 4. Screen Number (phase 001..255 looping)
+    // 4. Screen Number (phase 001..255 looping, only on change)
     if (this.screenEl) {
       const phase = ((currentScreenIndex % 255) + 255) % 255 + 1;
-      this.screenEl.textContent = String(phase).padStart(3, '0');
+      if (phase !== this._lastScreen) {
+        this._lastScreen = phase;
+        this.screenEl.textContent = String(phase).padStart(3, '0');
+      }
     }
 
-    // 4b. Heading arrows right of the phase number: current direction
-    // green, opposite direction light gray.
+    // 4b. Heading arrows: recolor only when the direction flips.
     if (this.compassUp && this.compassDown) {
       const north = player.targetRotY === 0;
-      this.compassUp.style.color = north ? '#7dd87d' : '#9aa0a8';
-      this.compassDown.style.color = north ? '#9aa0a8' : '#7dd87d';
+      if (north !== this._lastNorth) {
+        this._lastNorth = north;
+        this.compassUp.style.color = north ? '#7dd87d' : '#9aa0a8';
+        this.compassDown.style.color = north ? '#9aa0a8' : '#7dd87d';
+      }
     }
 
-    // 5. Treasures
-    if (this.treasuresEl) {
+    // 5. Treasures (only on change)
+    if (this.treasuresEl && player.treasuresCollected !== this._lastTreasures) {
+      this._lastTreasures = player.treasuresCollected;
       this.treasuresEl.textContent = `${player.treasuresCollected}`;
     }
 
-    // 5b. High score (above the gem counter)
+    // 5b. High score (only on change)
     if (this.recordEl) {
-      this.recordEl.textContent = String(getHighScore()).padStart(6, '0');
+      const record = getHighScore();
+      if (record !== this._lastRecord) {
+        this._lastRecord = record;
+        this.recordEl.textContent = String(record).padStart(6, '0');
+      }
     }
 
     // Rear-log aid: Expanding striped bar (zebra pattern).

@@ -9,7 +9,11 @@ import {
   isSharedModelMaterial,
 } from './models/index.js';
 import { createVoxelMaterial } from './voxel.js';
-import { audio } from './audio.js';
+import { updateVines } from './systems/vines.js';
+import { updateCrocs } from './systems/crocs.js';
+import { updateRollingLogs } from './systems/logs.js';
+import { updateQuicksand } from './systems/quicksand.js';
+import { updateAmbient } from './systems/ambient.js';
 import {
   SCREEN_LENGTH,
   PATH_WIDTH,
@@ -167,7 +171,12 @@ export class World {
     return mat;
   }
 
-  // Screen management
+  // Screen management (progressive + asynchronous).
+  //
+  // Screen builds (voxel geometry) are the biggest main-thread cost, so they
+  // go through a priority queue: at most one screen is built per frame, the
+  // nearest first, keeping every frame under a small time budget. Distant
+  // prefetch happens in idle callbacks so gameplay frames never hitch.
   getOrCreateScreen(screenIndex) {
     if (this.screens.has(screenIndex)) {
       return this.screens.get(screenIndex);
@@ -178,16 +187,58 @@ export class World {
     return screenData;
   }
 
+  // Enqueue a screen build ordered by distance to the current screen.
+  enqueueScreen(screenIndex, currentScreenIndex) {
+    if (this.screens.has(screenIndex)) return;
+    if (!this._screenQueue) {
+      this._screenQueue = [];
+      this._queuedScreens = new Set();
+    }
+    if (this._queuedScreens.has(screenIndex)) return;
+    this._queuedScreens.add(screenIndex);
+    this._screenQueue.push(screenIndex);
+    this._screenQueue.sort((a, b) => Math.abs(a - currentScreenIndex) - Math.abs(b - currentScreenIndex));
+  }
+
+  // Builds queued screens while inside the frame budget (default 6ms).
+  // Returns the number of screens built.
+  drainScreenQueue(currentScreenIndex, budgetMs = 6) {
+    if (!this._screenQueue || this._screenQueue.length === 0) return 0;
+    const start = performance.now();
+    let built = 0;
+    while (this._screenQueue.length > 0) {
+      const next = this._screenQueue.shift();
+      this._queuedScreens.delete(next);
+      if (this.screens.has(next)) continue;
+      this.getOrCreateScreen(next);
+      built++;
+      // One screen per frame max: voxel builds are chunky, and the nearest
+      // screen is always first in the queue.
+      if (built >= 1 || performance.now() - start > budgetMs) break;
+    }
+    return built;
+  }
+
+  // Idle-time prefetch of screens further ahead (never blocks a frame).
+  prefetchScreensIdle(indices) {
+    const run = () => {
+      for (const i of indices) {
+        if (!this.screens.has(i)) this.getOrCreateScreen(i);
+      }
+    };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(run, { timeout: 2000 });
+    } else {
+      setTimeout(run, 0);
+    }
+  }
+
   updateVisibleScreens(currentScreenIndex) {
     const keepRange = 2;
-    const missing = [];
     for (let i = currentScreenIndex - 1; i <= currentScreenIndex + keepRange; i++) {
-      if (!this.screens.has(i)) missing.push(i);
+      this.enqueueScreen(i, currentScreenIndex);
     }
-    missing.sort((a, b) => Math.abs(a - currentScreenIndex) - Math.abs(b - currentScreenIndex));
-    if (missing.length > 0) {
-      this.getOrCreateScreen(missing[0]);
-    }
+    this.drainScreenQueue(currentScreenIndex);
 
     for (const [idx, screen] of this.screens.entries()) {
       if (idx < currentScreenIndex - 1 || idx > currentScreenIndex + keepRange + 1) {
@@ -199,9 +250,7 @@ export class World {
   }
 
   prefetchScreen(screenIndex) {
-    if (!this.screens.has(screenIndex)) {
-      this.getOrCreateScreen(screenIndex);
-    }
+    this.enqueueScreen(screenIndex, screenIndex - 2);
   }
 
   disposeScreenGroup(group) {
@@ -298,8 +347,8 @@ export class World {
   }
 
   // LightPool delegation
-  updateLightPool(playerZ, underground) {
-    this.lightPoolManager.update(playerZ, underground);
+  updateLightPool(playerZ, underground, delta = 0) {
+    this.lightPoolManager.update(playerZ, underground, delta);
   }
 
   // HazardBuilder delegation
@@ -371,7 +420,8 @@ export class World {
     this.hazardBuilder.addTreasure(group, screenIndex, z, type, slotKey);
   }
 
-  // Update loop for all dynamic entities
+  // Update loop for all dynamic entities (delegates to src/systems/*; each
+  // system culls distant entities so per-frame CPU scales with what is near).
   update(delta, playerZ = 0, inTunnel = false, climbing = null, northFacing = true, playerVz = 0) {
     const currentScreen = Math.floor(-playerZ / SCREEN_LENGTH);
     this.tunnelManager.visibleLadderScreens = new Set([currentScreen]);
@@ -390,291 +440,14 @@ export class World {
     const facingDir = northFacing ? -1 : 1;
     const isAhead = (hz) => (hz - playerZ) * facingDir > -2.0;
 
-    // 1. Update Swinging Vines
-    this.activeVines.forEach(v => {
-      v.time += delta * v.vine.speed;
-      v.vine.angle = Math.sin(v.time) * v.vine.maxAngle;
-      v.vine.pivot.rotation.x = v.vine.angle;
-    });
-
-    // 2. Update Crocodiles
-    this.activeCrocodiles.forEach(c => {
-      c.mouthTimer += delta;
-      const cycleTime = c.mouthTimer % 4.4;
-      let targetAngle = 0;
-
-      if (cycleTime < 2.5) {
-        c.isOpen = false;
-        targetAngle = 0;
-        if (c.croc.eyeMaterial) c.croc.eyeMaterial.color.setHex(0xf8d820);
-        if (c.wasOpen) {
-          if (isAhead(c.z)) audio.playCrocSnap();
-          c.wasOpen = false;
-        }
-      } else if (cycleTime < 2.8) {
-        c.isOpen = false;
-        targetAngle = -0.2;
-        if (c.croc.eyeMaterial) c.croc.eyeMaterial.color.setHex(0xff8800);
-      } else if (cycleTime < 4.1) {
-        c.isOpen = true;
-        c.wasOpen = true;
-        targetAngle = -1.15;
-        if (c.croc.eyeMaterial) c.croc.eyeMaterial.color.setHex(0xff0000);
-      } else {
-        c.isOpen = true;
-        targetAngle = 0;
-      }
-
-      if (c.croc.upperJaw) {
-        c.croc.currentAngle = THREE.MathUtils.lerp(c.croc.currentAngle || 0, targetAngle, delta * 16);
-        c.croc.upperJaw.rotation.x = c.croc.currentAngle;
-      }
-    });
-
-    // 3. Update Rolling Logs
-    this.nearestLogThreat = null;
-    this.activeRollingLogs.forEach(l => {
-      l.clock += delta;
-      if (l.waiting) {
-        if (l.clock >= l.nextDrop) {
-          l.nextDrop += World.ROLLING_CYCLE;
-          l.waiting = false;
-          l.falling = true;
-          l.z = l.spawnZ;
-          l.y = l.spawnY;
-          l.vy = 0;
-          l.mesh.visible = true;
-          l.mesh.position.z = l.z;
-          l.mesh.position.y = l.y;
-          l.landingShadow.visible = true;
-          if (!this.activeHazards.includes(l)) this.activeHazards.push(l);
-        } else {
-          return;
-        }
-      }
-
-      if (l.falling) {
-        l.vy -= 30 * delta;
-        l.y += l.vy * delta;
-        const fallProgress = THREE.MathUtils.clamp(
-          1 - (l.y - l.groundY) / l.maxFallHeight,
-          0,
-          1
-        );
-        const bandWidth = Math.max(0.01, fallProgress * 9.5);
-        l.landingShadow.visible = true;
-        l.landingShadow.position.z = l.z;
-        if (l.band) l.band.scale.set(bandWidth, 1, 1);
-        if (l.tex) l.tex.repeat.set(bandWidth / 1.5, 1);
-        if (l.bandMat) l.bandMat.opacity = 0.4 + fallProgress * 0.5;
-
-        if (l.y <= l.groundY) {
-          l.y = l.groundY;
-          l.vy = 0;
-          l.falling = false;
-          l.landingShadow.visible = false;
-        }
-        l.mesh.position.y = l.y;
-        l.mesh.rotation.x += delta * 3;
-      } else if (l.fallingIntoPit) {
-        l.vy -= 30 * delta;
-        l.y += l.vy * delta;
-        l.z = l.exitPitZ;
-        l.mesh.position.y = l.y;
-        l.mesh.position.z = l.z;
-        l.mesh.rotation.x += delta * 10;
-
-        if (l.y <= 0.2) {
-          this.debrisManager.spawnLogShatter(l.group, l.screenIndex, l.z);
-          l.waiting = true;
-          l.falling = false;
-          l.fallingIntoPit = false;
-          l.mesh.visible = false;
-          l.landingShadow.visible = false;
-          const hi = this.activeHazards.indexOf(l);
-          if (hi >= 0) this.activeHazards.splice(hi, 1);
-        }
-      } else {
-        l.mesh.position.y = l.groundY;
-        l.mesh.rotation.x += delta * 12;
-        l.z += l.speed * delta;
-        l.mesh.position.z = l.z;
-
-        const ldz = Math.abs(l.z - playerZ);
-        if (ldz < 25) {
-          l.knockTimer = (l.knockTimer ?? 0) - delta;
-          if (l.knockTimer <= 0) {
-            audio.playWoodKnock(0.06 + 0.3 * (1 - ldz / 25));
-            l.knockTimer = 0.12 + (ldz / 25) * 0.7;
-          }
-        }
-
-        const relV = playerVz - l.speed;
-        let tHit = Infinity;
-        if (Math.abs(relV) > 0.5) tHit = (l.z - playerZ) / relV;
-        if (tHit >= 0 && tHit < 4 && (this.nearestLogThreat === null || tHit < this.nearestLogThreat.t)) {
-          this.nearestLogThreat = { t: tHit, logZ: l.z };
-        }
-
-        if (l.z >= l.exitPitZ) {
-          l.z = l.exitPitZ;
-          l.y = l.groundY;
-          l.vy = 0;
-          l.fallingIntoPit = true;
-          l.landingShadow.visible = false;
-        }
-      }
-    });
-
-    // 3b. Log shatter debris physics
+    updateVines(this, delta, playerZ);
+    updateCrocs(this, delta, playerZ, isAhead);
+    updateRollingLogs(this, delta, playerZ, playerVz);
     this.debrisManager.update(delta);
+    updateAmbient(this, delta, playerZ);
+    updateQuicksand(this, delta, playerZ, isAhead);
 
-    // 4b. Tunnel torch flicker
-    this.torchTime += delta;
-    this.animatedTorches.forEach(t => {
-      t.emitter.intensity = 6 + Math.sin(this.torchTime * 13 + t.seed) * 1.3 +
-        Math.sin(this.torchTime * 29 + t.seed * 2) * 0.7;
-    });
-
-    // Update Snakes
-    this.animatedSnakes.forEach(s => {
-      s.time += delta;
-      const burst = Math.sin(s.time * 5);
-      if (burst > 0.4) {
-        s.snake.tongue.rotation.x = Math.sin(s.time * 30) * 0.4;
-      } else {
-        s.snake.tongue.rotation.x = 0;
-      }
-      s.snake.tail.rotation.y = Math.sin(s.time * 8) * 0.4;
-    });
-
-    // 4. Update Campfires
-    this.animatedCampfires.forEach(f => {
-      f.time += delta;
-      const t = f.time;
-      const c = f.campfire;
-
-      const scaleCoreY = 1.0 + Math.sin(t * 14) * 0.16 + Math.cos(t * 22) * 0.1;
-      const scaleCoreXZ = 1.0 + Math.sin(t * 9) * 0.08;
-      if (c.coreFlame) {
-        c.coreFlame.scale.set(scaleCoreXZ, scaleCoreY, scaleCoreXZ);
-      }
-
-      if (c.outerFlames) {
-        c.outerFlames.forEach((flame, i) => {
-          const scaleY = 1.0 + Math.sin(t * 12 + i * 1.7) * 0.28 + Math.sin(t * 19 + i * 2.3) * 0.14;
-          const swayX = Math.sin(t * 7 + i * 1.4) * 0.08;
-          const swayZ = Math.cos(t * 8 + i * 1.8) * 0.08;
-          flame.scale.set(1.0, scaleY, 1.0);
-          flame.rotation.z = swayX;
-          flame.rotation.x = swayZ;
-        });
-      }
-
-      if (c.embers) {
-        c.embers.forEach(ember => {
-          ember.mesh.position.y += ember.speed * delta;
-          ember.mesh.position.x += Math.sin(t * 5 + ember.seed) * 0.012;
-          ember.mesh.position.z += Math.cos(t * 4 + ember.seed) * 0.012;
-
-          if (ember.mesh.position.y > 2.5) {
-            ember.mesh.position.y = 0.35 + Math.random() * 0.2;
-            ember.mesh.position.x = (Math.random() - 0.5) * 0.6;
-            ember.mesh.position.z = (Math.random() - 0.5) * 0.6;
-          }
-        });
-      }
-
-      if (f.emitter) {
-        f.emitter.intensity = 2.0 + Math.sin(t * 18) * 0.4 + (Math.random() - 0.5) * 0.3;
-      }
-    });
-
-    // 5. Update Scorpions
-    this.activeHazards.filter(h => h.type === 'scorpion').forEach(s => {
-      s.time += delta * (2.2 / (s.patrolRange || 3));
-      s.mesh.position.z = s.baseZ + Math.sin(s.time) * (s.patrolRange || 3);
-      s.z = s.mesh.position.z;
-      s.mesh.rotation.y = Math.cos(s.time) >= 0 ? 0 : Math.PI;
-
-      s.mesh.rotation.z = Math.sin(s.time * 12) * 0.04;
-      s.mesh.position.y = (s.baseY ?? 0.08) + Math.abs(Math.sin(s.time * 12)) * 0.03;
-
-      if (s.emitter) {
-        s.emitter.intensity = 1.4 + Math.sin(s.time * 8) * 0.5;
-      }
-    });
-
-    // 6. Update Treasures
-    this.activeTreasures.forEach(t => {
-      if (!t.collected) {
-        t.mesh.rotation.y += delta * 2.2;
-      }
-    });
-
-    // 7. Update Quicksand Pits
-    this.activeOpeningPits.forEach(p => {
-      p.timer += delta;
-      const n = p.numSegments;
-      const total = p.closedDur + p.openingDur + p.openDur + p.closingDur;
-      const cycleTime = p.timer % total;
-
-      let phase = 'closed';
-      if (cycleTime < p.closedDur) {
-        phase = 'closed';
-      } else if (cycleTime < p.closedDur + p.openingDur) {
-        phase = 'opening';
-      } else if (cycleTime < p.closedDur + p.openingDur + p.openDur) {
-        phase = 'open';
-      } else {
-        phase = 'closing';
-      }
-      p.phase = phase;
-
-      if (phase === 'opening') {
-        if (!p.rumblePlayed && isAhead(p.z)) {
-          audio.playQuicksandRumble();
-          p.rumblePlayed = true;
-        }
-      } else if (phase === 'closed') {
-        if (p.wasOpen) {
-          if (isAhead(p.z)) audio.playGroundThud();
-          p.wasOpen = false;
-          p.rumblePlayed = false;
-        }
-      }
-
-      let openCount = 0;
-      p.segments.forEach((seg, i) => {
-        const half = Math.max(0.5, (n - 1) / 2);
-        const d = Math.abs(i - (n - 1) / 2) / half;
-        const openStart = p.closedDur + d * p.openingDur;
-        const closeStart = p.closedDur + p.openingDur + p.openDur + (1 - d) * p.closingDur;
-        const target = cycleTime >= openStart && cycleTime < closeStart ? 1 : 0;
-
-        seg.openAmount = THREE.MathUtils.lerp(seg.openAmount ?? 0, target, delta * 10);
-        if (Math.abs(seg.openAmount - target) < 0.01) seg.openAmount = target;
-        seg.isOpen = seg.openAmount > 0.5;
-        if (seg.isOpen) openCount++;
-
-        const sep = seg.openAmount * 1.4;
-        const sink = seg.openAmount * 4.0;
-        const moving = Math.abs(target - seg.openAmount) > 0.02 ? 1 : 0;
-        const jitter = moving * Math.sin(p.timer * 50 + i * 2.1) * 0.06;
-        seg.leftMesh.position.set(seg.baseOffset - sep + jitter, -sink, seg.baseOffset);
-        seg.rightMesh.position.set(seg.baseOffset + sep + jitter, -sink, seg.baseOffset);
-
-        const hide = seg.openAmount > 0.95;
-        seg.leftMesh.visible = !hide;
-        seg.rightMesh.visible = !hide;
-      });
-
-      p.openCount = openCount;
-      p.isOpen = openCount > 0;
-      if (openCount > 0) p.wasOpen = true;
-    });
-
-    // 8. Assign pooled PointLights
-    this.lightPoolManager.update(playerZ, !!(inTunnel || climbing));
+    // Assign pooled PointLights (slot reassignment is throttled internally).
+    this.lightPoolManager.update(playerZ, !!(inTunnel || climbing), delta);
   }
 }
