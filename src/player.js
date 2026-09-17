@@ -1,7 +1,7 @@
 // Player Controller - 1st Person Perspective (FPS) for Atari Pitfall 3D
 import * as THREE from 'three';
 import { audio } from './audio.js';
-import { SCREEN_LENGTH, TUNNEL_FLOOR_Y, CEIL_TOP_Y, PIT_FLOOR_Y } from './world.js';
+import { SCREEN_LENGTH, TUNNEL_FLOOR_Y, CEIL_TOP_Y, PIT_FLOOR_Y, screenRoom } from './world.js';
 import { createPlayerArmsModel } from './models/index.js';
 import { t, getHighScore, getShowHelp, submitScore } from './i18n.js';
 import { DEBUG_GOD_MODE } from './debug.js';
@@ -10,12 +10,21 @@ export const GRAVITY = 28.0;
 export const JUMP_VELOCITY = 10.5;
 export const RUN_SPEED = 9.0;
 export const EYE_HEIGHT = 2.2;
-// Underground shortcut pace: Harry runs 2x faster in hazardous tunnel screens (jumping
-// stays enabled — it is the only way past scorpions).
-export const TUNNEL_SPEED_MULT = 2.0;
+// Underground shortcut pace: ladder/scorpion screens walk at normal surface
+// pace (jumping stays enabled — it is the only way past scorpions).
+export const TUNNEL_SPEED_MULT = 1.0;
 // Empty underground screens have no ladder or scorpion to negotiate, so Harry
-// can sprint through them at the faster transit pace.
-export const EMPTY_TUNNEL_SPEED_MULT = 4.0;
+// sprints through them at 6x, braking smoothly into the next 1x screen.
+export const EMPTY_TUNNEL_SPEED_MULT = 6.0;
+// Planned braking decel (m/s^2) capping the 6x cruise by distance to the
+// next ladder/scorpion screen: ~41m of smooth slowdown from 54 to 9 m/s.
+export const TUNNEL_BRAKE_DECEL = 35.0;
+// Animated warp through empty tunnel screens: top speed, stop margin before
+// the next ladder/scorpion screen edge, and min trip length to engage.
+export const WARP_SPEED = 60.0;
+export const WARP_STOP_MARGIN = 6.0;
+export const WARP_MIN_DIST = 25.0;
+export const WARP_FOV = 95.0;
 // Grace period after releasing a vine during which an open crocodile mouth
 // cannot kill (enough time to clear the last croc and land back on track).
 export const CROC_BITE_GRACE_DURATION = 1.0;
@@ -31,6 +40,9 @@ export class Player {
     this.vy = 0;
     this.vz = 0;
     this.isGrounded = true;
+    // Animated tunnel warp: null or { dirSign (-1 toward -Z, +1 toward +Z), targetZ }.
+    this.warp = null;
+    this.baseFov = this.camera?.fov ?? 75;
 
     // Input state
     this.moveForward = false;
@@ -431,29 +443,122 @@ export class Player {
     let targetVz = 0;
     // 0 = face -Z (dir = -1), Math.PI = face +Z (dir = 1)
     const dir = this.targetRotY === Math.PI ? 1 : -1;
-    // Underground shortcut pace: hazardous/ladder screens use 2x, while an
-    // empty screen uses 4x to shorten the safe transit sections.
-    let paceMultiplier = 1;
-    if (this.inTunnel) {
-      const tunnelScreen = Math.floor(-this.z / SCREEN_LENGTH);
-      const tunnelType = world.getScreenType(tunnelScreen);
-      const hasLadder = tunnelType === 'HOLE_SINGLE' || tunnelType === 'HOLE_TRIPLE';
-      const hasScorpion = world.activeHazards?.some((hazard) =>
-        hazard.type === 'scorpion' &&
-        hazard.screenIndex === -1 &&
-        Math.floor(-hazard.baseZ / SCREEN_LENGTH) === tunnelScreen
+    // Intended travel sense from held inputs (+1/-1/0), independent of pace.
+    const moveSign = ((this.moveForward || this.padForward) ? 1 : 0) -
+      ((this.moveBackward || this.padBackward) ? 1 : 0);
+    // Underground shortcut pace: ladder/scorpion screens walk at normal 1x
+    // pace, while an empty screen cruises at 6x with planned braking to a
+    // stop point WARP_STOP_MARGIN before the next 1x screen
+    // (v^2 = v0^2 + 2*a*d caps the cruise target). Long empty runs trigger
+    // the animated warp below instead of the plain cruise.
+    const tunnelScreenNow = this.inTunnel ? Math.floor(-this.z / SCREEN_LENGTH) : null;
+    // Pace/warp authority while a corridor is active: its room array decides
+    // (listed rooms run at 1x, the rest warp). Without a corridor (e.g. a
+    // side-hole drop before any ladder screen), fall back to surface holes
+    // plus the corridor scorpions currently alive.
+    const corridorRooms = (this.inTunnel && world.tunnelCorridor?.interestingRooms) || null;
+    const isTunnelScreenInteresting = (s) => {
+      if (corridorRooms) return corridorRooms.has(screenRoom(s));
+      const t = world.getScreenType(s);
+      if (t === 'HOLE_SINGLE' || t === 'HOLE_TRIPLE') return true;
+      return world.activeHazards?.some((h) =>
+        h.type === 'scorpion' && h.screenIndex === -1 &&
+        Math.floor(-h.baseZ / SCREEN_LENGTH) === s
       );
-      paceMultiplier = hasLadder || hasScorpion
-        ? TUNNEL_SPEED_MULT
-        : EMPTY_TUNNEL_SPEED_MULT;
+    };
+    // Cancel a running warp when leaving the tunnel, climbing, or steering
+    // against it; a brick wall just ahead cancels it too.
+    if (this.warp) {
+      const warpTravel = this.warp.dirSign;
+      const pushingAgainst = moveSign !== 0 && dir * moveSign !== warpTravel;
+      let wallAhead = false;
+      if (world.activeTunnelWalls?.length) {
+        for (const wl of world.activeTunnelWalls) {
+          const gap = warpTravel < 0 ? this.z - wl.z : wl.z - this.z;
+          if (gap > 0 && gap < 3) {
+            wallAhead = true;
+            break;
+          }
+        }
+      }
+      if (!this.inTunnel || this.climbing || pushingAgainst || wallAhead) this.warp = null;
     }
-    const pace = RUN_SPEED * paceMultiplier;
+    // Engage the warp: running an empty screen toward a 1x screen far enough
+    // ahead. The warp auto-pilots to a stop point before that screen's edge.
+    if (!this.warp && this.inTunnel && !this.climbing && moveSign !== 0 &&
+      tunnelScreenNow !== null && !isTunnelScreenInteresting(tunnelScreenNow)) {
+      const travel = dir * moveSign; // -1 toward -Z, +1 toward +Z
+      const step = travel < 0 ? 1 : -1;
+      for (let k = 1; k <= 10; k++) {
+        const cand = tunnelScreenNow + step * k;
+        if (isTunnelScreenInteresting(cand)) {
+          const edge = travel < 0 ? -cand * SCREEN_LENGTH : -(cand + 1) * SCREEN_LENGTH;
+          const distToEdge = travel < 0 ? this.z - edge : edge - this.z;
+          if (distToEdge - WARP_STOP_MARGIN > WARP_MIN_DIST) {
+            this.warp = {
+              dirSign: travel,
+              targetZ: travel < 0 ? edge + WARP_STOP_MARGIN : edge - WARP_STOP_MARGIN,
+            };
+          }
+          break;
+        }
+      }
+    }
+    if (this.warp) {
+      // Warp profile: same braking curve toward the stop point, capped at
+      // WARP_SPEED. Ends at surface pace right before the next phase.
+      const remain = this.warp.dirSign < 0 ? this.z - this.warp.targetZ : this.warp.targetZ - this.z;
+      if (remain <= 0.3) {
+        this.z = this.warp.targetZ;
+        this.vz = this.warp.dirSign * RUN_SPEED;
+        targetVz = this.vz;
+        this.warp = null;
+      } else {
+        const warpTarget = Math.min(
+          WARP_SPEED,
+          Math.sqrt(RUN_SPEED * RUN_SPEED + 2 * TUNNEL_BRAKE_DECEL * remain)
+        );
+        targetVz = this.warp.dirSign * warpTarget;
+      }
+    }
+    if (!this.warp) {
+      let paceMultiplier = 1;
+      if (this.inTunnel) {
+        if (isTunnelScreenInteresting(tunnelScreenNow)) {
+          paceMultiplier = TUNNEL_SPEED_MULT;
+        } else {
+          paceMultiplier = EMPTY_TUNNEL_SPEED_MULT;
+          if (moveSign !== 0) {
+            const travel = dir * moveSign; // -1 toward -Z, +1 toward +Z
+            const step = travel < 0 ? 1 : -1;
+            for (let k = 1; k <= 10; k++) {
+              const cand = tunnelScreenNow + step * k;
+              if (isTunnelScreenInteresting(cand)) {
+                const edge = travel < 0 ? -cand * SCREEN_LENGTH : -(cand + 1) * SCREEN_LENGTH;
+                // Brake toward the warp stop point so a manual run hands off
+                // at surface pace exactly where the warp would end.
+                const dist = (travel < 0 ? this.z - edge : edge - this.z) - WARP_STOP_MARGIN;
+                const cruise = RUN_SPEED * EMPTY_TUNNEL_SPEED_MULT;
+                const allowed = dist <= 0
+                  ? RUN_SPEED
+                  : Math.sqrt(RUN_SPEED * RUN_SPEED + 2 * TUNNEL_BRAKE_DECEL * dist);
+                paceMultiplier = THREE.MathUtils.clamp(allowed / RUN_SPEED, TUNNEL_SPEED_MULT, cruise / RUN_SPEED);
+                break;
+              }
+            }
+          }
+        }
+      }
+      const pace = RUN_SPEED * paceMultiplier;
 
-    if (this.moveForward || this.padForward) targetVz += pace * dir;
-    if (this.moveBackward || this.padBackward) targetVz -= pace * dir;
+      if (this.moveForward || this.padForward) targetVz += pace * dir;
+      if (this.moveBackward || this.padBackward) targetVz -= pace * dir;
+    }
 
-    // Responsive arcade acceleration
-    this.vz = THREE.MathUtils.lerp(this.vz, targetVz, delta * 15);
+    // Responsive arcade acceleration (slower spool-up/down while warping
+    // so the dash-in and the braking feel animated instead of instant).
+    const accelRate = this.warp ? 4 : 15;
+    this.vz = THREE.MathUtils.lerp(this.vz, targetVz, Math.min(1, delta * accelRate));
     const prevZ = this.z;
     this.z += this.vz * delta;
 
@@ -1064,6 +1169,13 @@ export class Player {
       this.lastBobSin = 0;
     }
 
+    // Warp stretch: widen the FOV while dashing, ease it back after.
+    const targetFov = this.warp ? WARP_FOV : this.baseFov;
+    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
+      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, delta * (this.warp ? 3 : 5)));
+      this.camera.updateProjectionMatrix();
+    }
+
     // Camera position & rotation (slight natural tilt towards the trail ahead)
     const targetCameraY = this.y + EYE_HEIGHT + bobY;
     this.camera.position.set(0, THREE.MathUtils.lerp(this.camera.position.y, targetCameraY, delta * 12), this.z);
@@ -1119,6 +1231,7 @@ export class Player {
     this.deathReasonKey = reasonKey;
     this.diedInTunnel = this.inTunnel;
     this.crocBiteGraceTimer = 0;
+    this.warp = null;
 
     // Fade to black on death
     const fade = document.getElementById('death-fade');
@@ -1241,6 +1354,9 @@ export class Player {
     this.climbing = null;
     this.climbGrace = 0;
     this.crocBiteGraceTimer = 0;
+    this.warp = null;
+    this.camera.fov = this.baseFov;
+    this.camera.updateProjectionMatrix();
     // Deactivate the tunnel corridor walls and scorpion on any surface respawn
     if (!tunnelRespawn && world) world.deactivateTunnelCorridor();
 
@@ -1267,13 +1383,17 @@ export class Player {
       this.z += 8;
     }
     if (tunnelRespawn) {
-      // Short drop back to the tunnel floor.
-      this.y = TUNNEL_FLOOR_Y + 2;
+      // Back on the tunnel floor directly: no sky fall underground.
+      this.y = TUNNEL_FLOOR_Y;
+      this.vy = 0;
+      this.isGrounded = true;
+      this.respawnDrop = false;
     } else {
       // Drop from the sky like the original: spawns high up and gravity does the rest.
       this.y = this.RESPAWN_DROP_HEIGHT;
+      this.isGrounded = false;
+      this.respawnDrop = true;
     }
-    this.respawnDrop = true;
     // Keep the facing direction from before death (no forced turn-around).
     if (this.targetRotY === undefined) this.targetRotY = 0;
     this.camera.rotation.y = this.targetRotY;
@@ -1308,7 +1428,19 @@ export class Player {
     this.vz = 0;
     this.targetRotY = 0;
     this.camera.rotation.y = 0;
+    this.camera.rotation.x = -0.04;
+    this.camera.rotation.z = 0;
+    this.camera.position.set(0, EYE_HEIGHT, 0);
     this.isGrounded = true;
+    this.moveForward = false;
+    this.moveBackward = false;
+    this.actionPressed = false;
+    this.actionJustPressed = false;
+    this.turnJustPressed = false;
+    this.padForward = false;
+    this.padBackward = false;
+    this.padPrevAction = false;
+    this.padPrevTurn = false;
     this.score = 2000;
     this.lives = 3;
     this.timeRemaining = 1200;
@@ -1317,14 +1449,31 @@ export class Player {
     this.isDying = false;
     this.deathTimer = 0;
     this.deathReasonKey = 'death.lifeLost';
+    this.diedInTunnel = false;
+    this.ceilDeathKey = 'death.cave';
     this.attachedVine = null;
     this.ignoredVine = null;
+    this.justReleasedVineTimer = 0;
     this.crocBiteGraceTimer = 0;
     if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
     this.tripCooldown = 0;
     this.isTripped = false;
     this.tripStandTimer = 0;
     this.respawnDrop = false;
+    // Surface restart: clear any underground state left over from the
+    // previous run (otherwise getSurfaceElevation keeps returning the
+    // tunnel floor and Harry falls through the trail on frame one).
+    this.inTunnel = false;
+    this.climbing = null;
+    this.climbZ = 0;
+    this.climbGrace = 0;
+    this.warp = null;
+    this.camera.fov = this.baseFov;
+    this.camera.updateProjectionMatrix();
+    this.checkpointZ = null;
+    this.lastSurfaceHoleScreen = null;
+    this.bobTimer = 0;
+    this.lastBobSin = 0;
 
     const prompt = document.getElementById('vine-prompt');
     if (prompt) prompt.classList.remove('active');

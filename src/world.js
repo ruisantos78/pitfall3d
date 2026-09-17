@@ -25,6 +25,11 @@ export const TUNNEL_FLOOR_Y = -12; // Underground tunnel floor (ladder screens)
 export const CEIL_TOP_Y = -7; // Cave ceiling top (landing on it is hit kill)
 export const PIT_FLOOR_Y = -1.0; // Shallow surface-pit floor, independent from the tunnel
 
+// 1-based room number (001..255) for any screen index, wrapping both ways.
+export function screenRoom(index) {
+  return (((index % 255) + 255) % 255) + 1;
+}
+
 export class World {
   constructor(scene) {
     this.scene = scene;
@@ -343,9 +348,17 @@ export class World {
     return SURFACE_MAPS[String(phase + 1).padStart(3, '0')];
   }
 
-  getShortcutExit(index) {
+  // Tunnel rooms for a screen: [entrance, ...scorpion rooms, exit].
+  // Rooms NOT listed warp; listed rooms run at 1x (see tunnelCorridor).
+  getTunnelRooms(index) {
     const phase = ((index % 255) + 255) % 255;
-    return UNDERGROUND_SHORTCUTS[String(phase + 1).padStart(3, '0')];
+    return UNDERGROUND_SHORTCUTS[String(phase + 1).padStart(3, '0')] ?? null;
+  }
+
+  getShortcutExit(index) {
+    const rooms = this.getTunnelRooms(index);
+    if (!rooms) return undefined;
+    return rooms[rooms.length - 1];
   }
 
   getWallZ(screenIndex, wall) {
@@ -391,6 +404,7 @@ export class World {
         exitWall: this.getSurfaceMap(exitScreen).Wall,
         entryZ,
         exitZ,
+        rooms: this.getTunnelRooms(i),
       });
     }
   }
@@ -937,11 +951,18 @@ export class World {
     const w2 = buildDynWall(farWallZ);
     this.tunnelCorridorWalls = [w1, w2];
 
-    // Spawn scorpions every 3 screens inside the corridor (excluding endpoints).
+    // Spawn scorpions in the array's middle rooms (travel order): walk from
+    // the entry screen toward the exit and drop one at each listed room.
+    // Endpoints are always excluded, even if listed.
+    const rooms = shortcut.rooms ?? [];
+    const scorpionRooms = new Set(rooms.slice(1, -1));
     const totalScreens = Math.abs(screenDelta);
+    const indexStep = Math.sign(screenDelta) || 1;
     const scorpionInfos = [];
-    for (let i = 3; i < totalScreens; i += 3) {
-      const scZ = entryZ + direction * (i * SCREEN_LENGTH);
+    for (let k = 1; k < totalScreens; k++) {
+      const s = entryScreenIndex + indexStep * k;
+      if (!scorpionRooms.has(screenRoom(s))) continue;
+      const scZ = -s * SCREEN_LENGTH - SCREEN_LENGTH / 2;
       const patrolRange = SCREEN_LENGTH * 0.25; // patrol 25% of a screen length
       this.addScorpion(this.scene, -1, scZ, TUNNEL_FLOOR_Y + 0.08, patrolRange);
       const sc = this.activeHazards[this.activeHazards.length - 1];
@@ -957,6 +978,8 @@ export class World {
       entryZ,
       exitZ,
       direction,
+      // Pace/warp authority: rooms in this set run at 1x, rooms outside warp.
+      interestingRooms: new Set(rooms),
     };
 
     // Mark which screens have their ladder ceiling open, so screens that build

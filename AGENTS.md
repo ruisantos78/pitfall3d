@@ -76,8 +76,9 @@ pitfall/
 #### [`src/player.js`](file:///home/ruisantos/Projects/pitfall/src/player.js)
 - **Physics Constants:**
   - `RUN_SPEED = 9.0` (walk speed forward/backward)
-  - `TUNNEL_SPEED_MULT = 2.0` (underground shortcut pace when stairs or scorpions are present)
-  - `EMPTY_TUNNEL_SPEED_MULT = 4.0` (safe empty tunnel transit pace)
+  - `TUNNEL_SPEED_MULT = 1.0` (normal surface pace on ladder/scorpion tunnel screens)
+  - `EMPTY_TUNNEL_SPEED_MULT = 6.0` (cruise pace on empty tunnel screens, with `TUNNEL_BRAKE_DECEL = 35.0` planned braking into the next 1x screen)
+  - Tunnel warp (`WARP_SPEED = 60.0`, `WARP_STOP_MARGIN = 6.0`, `WARP_FOV = 95.0`): long empty runs auto-dash with a widened FOV and stop 6m before the next ladder/scorpion screen
   - `JUMP_VELOCITY = 10.5`, `GRAVITY = 28.0` (air time ~0.75s, max running jump range = 6.75m)
   - `EYE_HEIGHT = 2.2` (Harry's first-person eye height)
   - **Natural Camera Tilt:** `camera.rotation.x = -0.04 + bobPitch` (~-2.3° tilt subtly facing the path ahead, framing the ground, obstacles and foreground arms).

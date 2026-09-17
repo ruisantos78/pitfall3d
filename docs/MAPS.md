@@ -34,12 +34,12 @@ Crocodile screens do not receive rolling logs. A crocodile screen is represented
 
 ## Shortcut map
 
-`src/maps/shortcuts.js` is a dictionary where the key is the entry screen and the value is the exit screen:
+`src/maps/shortcuts.js` is a dictionary where the key is the entry room and the value is `[entrance, ...scorpion rooms in travel order, exit]`:
 
 ```js
 export const UNDERGROUND_SHORTCUTS = Object.freeze({
-  '001': 250,
-  '250': 1,
+  '001': [1, 253, 250],
+  '250': [250, 253, 1],
 });
 ```
 

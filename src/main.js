@@ -279,6 +279,10 @@ class Game {
 
   // Removes current screens and regenerates from scratch (used on restart and back-to-menu)
   rebuildWorld() {
+    // Tear down any active underground corridor first: its walls/scorpions
+    // live directly on the scene (screenIndex -1) and survive per-screen
+    // cleanup, so without this the next run reuses the game-over tunnel.
+    this.world.deactivateTunnelCorridor();
     for (const [idx, screen] of this.world.screens.entries()) {
       this.scene.remove(screen.group);
       this.world.removeScreenEntities(screen);
@@ -286,6 +290,9 @@ class Game {
     this.world.screens.clear();
     // Authentic treasureBits reset (InitGame): collected treasures return on a new run.
     this.world.resetRun();
+    // Room 1 (screen 0) is built synchronously so its surface + tunnel
+    // stretch always exist before the first frame of the new run.
+    this.world.getOrCreateScreen(0);
     this.world.updateVisibleScreens(0);
   }
 

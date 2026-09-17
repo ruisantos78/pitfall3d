@@ -5,7 +5,7 @@ Underground shortcuts connect two screens with holes. The tunnel is continuous, 
 ## Data flow
 
 - `src/maps/surface.js` describes the surface screen data.
-- `src/maps/shortcuts.js` maps each entry screen to its exit screen.
+- `src/maps/shortcuts.js` maps each entry room to `[entrance, ...scorpion rooms in travel order, exit]` (rooms NOT listed warp, listed rooms run at 1x).
 - Shortcut activation is triggered only when Harry enters a hole screen from the surface.
 - Underground movement never searches for or activates another shortcut automatically.
 
@@ -23,20 +23,15 @@ Wall collision is swept along the player's Z movement in both directions. The pl
 
 ## Scorpions
 
-Scorpions are created only for the active shortcut. One is placed every three screens inside the corridor, excluding the entry and exit screens:
-
-```js
-for (let i = 3; i < distance; i += 3) {
-  // one scorpion at every third screen
-}
-```
+Scorpions are created only for the active shortcut, one per middle room listed in its array (generated every three screens inside the corridor, excluding the entry and exit screens). The spawn walk follows travel order from the entry screen toward the exit.
 
 When the shortcut changes, its scorpions are removed from the scene, hazard list, and light emitters.
 
 ## Speed
 
-- Sections containing a ladder or scorpion use `1x` speed.
-- Empty tunnel sections use `4x` transit speed.
+- Rooms listed in the active corridor array (entrance, scorpions, exit) use `1x` speed.
+- Unlisted transit rooms use `6x` cruise with planned braking, or the animated warp (`60 m/s`, stops `6m` before the next listed room).
+- Without an active corridor, ladder screens fall back to `1x`.
 
 ## Lifecycle
 
