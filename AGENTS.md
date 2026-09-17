@@ -148,9 +148,9 @@ pitfall/
   - Positioned at `Y = 0.05` for smooth rotation and full visibility over the trail.
 - `createBrickWallModel(voxelSize = 0.5)`:
   - Authentic underground dead-end (`pitfall.asm` `Wall`/`WallColor` data): 9m × 5m × 1m running-bond brickwork in `DARK_RED` with `GREY` mortar (full mortar row every 4th course, staggered joints, alternating brick shades), spanning the full tunnel cross-section.
-- `createScorpionModel(voxelSize = 0.28)`:
-  - Giant high-visibility arcade scorpion with vibrant red carapace and obsidian/gold bands.
-  - Tall arched tail with stinger and glowing yellow venom bulb at `Y = 6` (~1.68m tall).
+- `createScorpionModel(voxelSize = 0.22)`:
+  - High-visibility arcade scorpion with vibrant red carapace and obsidian/gold bands.
+  - Tall arched tail with stinger and glowing yellow venom bulb at `Y = 6` (~1.32m tall).
   - Dynamic venom glow via a pooled-light emitter anchor (no per-screen `PointLight`, so screen crossings never recompile shaders).
   - Glowing cyan eyes, 8 articulated legs and menacing front pincers.
 

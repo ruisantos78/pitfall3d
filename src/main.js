@@ -145,6 +145,7 @@ class Game {
     const showOptions = (show) => {
       if (menuMain) menuMain.classList.toggle('hidden', show);
       if (menuOptions) menuOptions.classList.toggle('hidden', !show);
+      this.updateMenuFocus();
     };
 
     if (optionsBtn) {
@@ -189,12 +190,6 @@ class Game {
     // Apply saved preferences (language + help) on startup
     this.refreshOptionsUI();
 
-    if (startOverlay) {
-      startOverlay.addEventListener('click', () => {
-        startGame();
-      });
-    }
-
     if (restartBtn) {
       restartBtn.addEventListener('click', () => {
         this.restartGame();
@@ -208,19 +203,37 @@ class Game {
       });
     }
 
-    // Allow Space or Enter or W or Up arrow to start / restart smoothly
+    // Keyboard menu navigation and actions (Arrows / WASD / Enter / Space / Escape)
     window.addEventListener('keydown', (e) => {
-      if (!this.isRunning) {
-        if (this.player && this.player.isGameOver) {
-          if (['Space', 'Enter'].includes(e.code)) {
-            this.restartGame();
-          }
-        } else {
-          // When the options menu is open, the keyboard must not start the game
-          const optionsOpen = menuOptions && !menuOptions.classList.contains('hidden');
-          if (!optionsOpen && ['Space', 'Enter', 'KeyW', 'ArrowUp'].includes(e.code)) {
-            startGame();
-          }
+      const isGameOver = !!(this.player && this.player.isGameOver);
+      if (this.isRunning && !isGameOver) return;
+
+      const code = e.code;
+      const isUp = ['ArrowUp', 'KeyW'].includes(code);
+      const isDown = ['ArrowDown', 'KeyS'].includes(code);
+      const isLeft = ['ArrowLeft', 'KeyA'].includes(code);
+      const isRight = ['ArrowRight', 'KeyD'].includes(code);
+      const isConfirm = ['Enter', 'Space'].includes(code);
+      const isBack = code === 'Escape';
+
+      if (isUp || isDown || isLeft || isRight) {
+        e.preventDefault();
+        const dir = (isUp || isLeft) ? -1 : 1;
+        this.navigateMenu(dir);
+        return;
+      }
+
+      if (isConfirm) {
+        e.preventDefault();
+        this.activateMenuSelected();
+        return;
+      }
+
+      if (isBack) {
+        const menuOptionsEl = document.getElementById('menu-options');
+        if (menuOptionsEl && !menuOptionsEl.classList.contains('hidden')) {
+          e.preventDefault();
+          showOptions(false);
         }
       }
     });
@@ -275,28 +288,74 @@ class Game {
     if (startOverlay) startOverlay.classList.remove('hidden');
 
     this.refreshOptionsUI();
+    this.updateMenuFocus();
   }
 
-  // Removes current screens and regenerates from scratch (used on restart and back-to-menu)
-  rebuildWorld() {
-    // Tear down any active underground corridor first: its walls/scorpions
-    // live directly on the scene (screenIndex -1) and survive per-screen
-    // cleanup, so without this the next run reuses the game-over tunnel.
-    this.world.deactivateTunnelCorridor();
-    for (const [idx, screen] of this.world.screens.entries()) {
-      this.scene.remove(screen.group);
-      this.world.removeScreenEntities(screen);
+  // Get currently visible and interactive menu buttons
+  getActiveMenuButtons() {
+    const gameoverOverlay = document.getElementById('gameover-overlay');
+    if (gameoverOverlay && !gameoverOverlay.classList.contains('hidden')) {
+      return Array.from(gameoverOverlay.querySelectorAll('button:not([disabled])'))
+        .filter(btn => btn.offsetParent !== null);
     }
-    this.world.screens.clear();
-    // Authentic treasureBits reset (InitGame): collected treasures return on a new run.
-    this.world.resetRun();
-    // Room 1 (screen 0) is built synchronously so its surface + tunnel
-    // stretch always exist before the first frame of the new run.
-    this.world.getOrCreateScreen(0);
-    this.world.updateVisibleScreens(0);
+    const menuOptions = document.getElementById('menu-options');
+    if (menuOptions && !menuOptions.classList.contains('hidden')) {
+      return Array.from(menuOptions.querySelectorAll('button:not([disabled])'))
+        .filter(btn => btn.offsetParent !== null);
+    }
+    const menuMain = document.getElementById('menu-main');
+    if (menuMain && !menuMain.classList.contains('hidden')) {
+      return Array.from(menuMain.querySelectorAll('button:not([disabled])'))
+        .filter(btn => btn.offsetParent !== null);
+    }
+    return [];
   }
 
-  // Gamepad Start/A starts or restarts from the menus (Xbox controller on Edge).
+  // Ensure an item in the active menu has visual focus
+  updateMenuFocus() {
+    const buttons = this.getActiveMenuButtons();
+    if (buttons.length === 0) return;
+    const current = document.activeElement;
+    if (!buttons.includes(current)) {
+      buttons.forEach(b => b.classList.remove('menu-focus'));
+      buttons[0].focus();
+      buttons[0].classList.add('menu-focus');
+    } else {
+      buttons.forEach(b => b.classList.toggle('menu-focus', b === current));
+    }
+  }
+
+  // Navigate through menu items in direction (-1 previous, +1 next)
+  navigateMenu(dir) {
+    const buttons = this.getActiveMenuButtons();
+    if (buttons.length === 0) return;
+    const current = document.activeElement;
+    let idx = buttons.indexOf(current);
+    if (idx === -1) {
+      idx = dir > 0 ? 0 : buttons.length - 1;
+    } else {
+      idx = (idx + dir + buttons.length) % buttons.length;
+    }
+    buttons.forEach(b => b.classList.remove('menu-focus'));
+    buttons[idx].focus();
+    buttons[idx].classList.add('menu-focus');
+    audio.playWoodKnock?.(0.2);
+  }
+
+  // Trigger click on currently selected menu button
+  activateMenuSelected() {
+    const buttons = this.getActiveMenuButtons();
+    if (buttons.length === 0) return;
+    let target = document.activeElement;
+    if (!buttons.includes(target)) {
+      target = buttons[0];
+    }
+    if (target) {
+      target.click();
+    }
+  }
+
+  // Gamepad navigation and selection on all menus
   pollGamepadMenu() {
     const pads = navigator.getGamepads ? navigator.getGamepads() : null;
     if (!pads) return;
@@ -307,18 +366,49 @@ class Game {
         break;
       }
     }
-    const held = !!(gp && ((gp.buttons[9] && gp.buttons[9].pressed) || (gp.buttons[0] && gp.buttons[0].pressed)));
-    if (held && !this.padMenuPrev) {
-      if (this.player && this.player.isGameOver) {
-        this.restartGame();
-      } else if (!this.isRunning && this.startGameFromMenu) {
-        // Don't hijack the options view: the user is toggling settings.
-        const menuOptions = document.getElementById('menu-options');
-        const optionsOpen = menuOptions && !menuOptions.classList.contains('hidden');
-        if (!optionsOpen) this.startGameFromMenu();
+    if (!gp) {
+      this.padNavPrev = false;
+      this.padMenuPrev = false;
+      this.padBackPrev = false;
+      return;
+    }
+
+    // Ensure focus highlight is active when using joypad
+    this.updateMenuFocus();
+
+    const pressed = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
+    const axisY = gp.axes.length > 1 ? gp.axes[1] : 0;
+    const axisX = gp.axes.length > 0 ? gp.axes[0] : 0;
+
+    const navUp = pressed(12) || axisY < -0.5;
+    const navDown = pressed(13) || axisY > 0.5;
+    const navLeft = pressed(14) || axisX < -0.5;
+    const navRight = pressed(15) || axisX > 0.5;
+
+    const navHeld = navUp || navDown || navLeft || navRight;
+    if (navHeld && !this.padNavPrev) {
+      const dir = (navUp || navLeft) ? -1 : 1;
+      this.navigateMenu(dir);
+    }
+    this.padNavPrev = navHeld;
+
+    // A button (0) or Start button (9) activates selected option
+    const confirmHeld = pressed(0) || pressed(9);
+    if (confirmHeld && !this.padMenuPrev) {
+      this.activateMenuSelected();
+    }
+    this.padMenuPrev = confirmHeld;
+
+    // B button (1) acts as back in options menu
+    const backHeld = pressed(1);
+    if (backHeld && !this.padBackPrev) {
+      const optionsBackBtn = document.getElementById('options-back-btn');
+      const menuOptionsEl = document.getElementById('menu-options');
+      if (optionsBackBtn && menuOptionsEl && !menuOptionsEl.classList.contains('hidden')) {
+        optionsBackBtn.click();
       }
     }
-    this.padMenuPrev = held;
+    this.padBackPrev = backHeld;
   }
 
   animate() {

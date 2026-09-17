@@ -1432,7 +1432,7 @@ export class World {
   }
 
   addScorpion(group, screenIndex, z, groundY = 0.08, patrolRange = 3) {
-    const scorpion = createScorpionModel(0.28);
+    const scorpion = createScorpionModel(0.22);
     scorpion.position.set(0, groundY, z);
     group.add(scorpion);
 
@@ -1444,7 +1444,7 @@ export class World {
       baseY: groundY,
       patrolRange,
       time: 0,
-      radius: 1.2,
+      radius: 0.95,
     };
     this.activeHazards.push(hazard);
     // Venom glow follows the patrolling scorpion (mesh transform applied).

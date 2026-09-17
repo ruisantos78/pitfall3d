@@ -356,12 +356,16 @@ body {
   font-size: 9px;
   cursor: pointer;
   transition: all 0.1s;
+  outline: none;
 }
 
-.retro-btn:hover {
+.retro-btn:hover,
+.retro-btn:focus-visible,
+.retro-btn.menu-focus {
   background: #444;
-  border-color: #fff;
+  border-color: #f8d820;
   color: #fff;
+  box-shadow: 0 0 10px #f8d820, inset 0 0 4px #f8d820;
 }
 
 .retro-btn:active {
@@ -499,12 +503,16 @@ body {
   letter-spacing: 2px;
   box-shadow: 0 6px 0 #704800;
   transition: transform 0.1s, box-shadow 0.1s;
+  outline: none;
 }
 
-.retro-btn-large:hover {
+.retro-btn-large:hover,
+.retro-btn-large:focus-visible,
+.retro-btn-large.menu-focus {
   background: #e09c00;
+  border-color: #f8d820;
   transform: translateY(-2px);
-  box-shadow: 0 8px 0 #704800;
+  box-shadow: 0 8px 0 #704800, 0 0 16px #f8d820;
 }
 
 .retro-btn-large:active {

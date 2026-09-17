@@ -3,7 +3,7 @@ import { BaseModel, SHARED_MATERIAL, C, cachedVoxelGeo } from './BaseModel.js';
 import { createVoxelGeometry } from '../voxel.js';
 
 export class ScorpionModel extends BaseModel {
-  build(voxelSize = 0.28) {
+  build(voxelSize = 0.22) {
     const group = this.group;
     const voxels = this.voxels;
     // Vibrant high-contrast Atari Palette
@@ -137,6 +137,6 @@ export class ScorpionModel extends BaseModel {
   }
 }
 
-export function createScorpionModel(voxelSize = 0.28) {
+export function createScorpionModel(voxelSize = 0.22) {
   return new ScorpionModel().build(voxelSize);
 }

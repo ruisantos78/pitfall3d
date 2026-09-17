@@ -403,14 +403,12 @@ export class Player {
     }
     if (this.climbGrace > 0) this.climbGrace -= delta;
 
-    // After tripping, stays face-down on the ground until the player presses a
-    // direction or the jump button. The direction that picks him up also resumes
-    // walking; jump only picks him up (jumping itself needs a fresh press).
+    // After tripping, Harry stays on his knees (Atari 2600 style) while the log passes over/by him.
+    // Once the hazard has passed (or after a short timeout), he stands back up and continues walking.
     if (this.isTripped) {
       this.vz = 0;
       this.vy = 0;
-      const jumpPressed = this.actionJustPressed;
-      this.actionJustPressed = false;
+      this.tripStandTimer += delta;
 
       const standingSurfaceY = this.getSurfaceElevation(world, this.z);
       if (standingSurfaceY > -5) {
@@ -418,25 +416,37 @@ export class Player {
         this.isGrounded = true;
       }
 
-      // Jump button picks him up instantly (single tap, no hold delay)
-      if (jumpPressed) {
+      // Check if the log has passed by Harry
+      let hasPassed = false;
+      const haz = this.trippingHazard;
+      if (haz && haz.type === 'rolling_log') {
+        // Rolling logs move toward +Z. Once hazard.z is past player.z + 1.2, it has cleared Harry.
+        if (haz.z > this.z + 1.2 || haz.falling || haz.fallingIntoPit) {
+          hasPassed = true;
+        }
+      } else if (haz && haz.type === 'log') {
+        // Stationary log: Harry kneels briefly and stands back up
+        if (this.tripStandTimer >= 0.6) {
+          hasPassed = true;
+        }
+      } else {
+        if (this.tripStandTimer >= 0.6) {
+          hasPassed = true;
+        }
+      }
+
+      // Safety timeout in case log stopped or disappeared
+      if (this.tripStandTimer >= 1.2) {
+        hasPassed = true;
+      }
+
+      if (hasPassed) {
         this.isTripped = false;
+        this.trippingHazard = null;
         this.tripStandTimer = 0;
+      } else {
         return;
       }
-
-      if (!this.moveForward && !this.moveBackward && !this.padForward && !this.padBackward) {
-        this.tripStandTimer = 0;
-        return;
-      }
-
-      this.tripStandTimer += delta;
-      if (this.tripStandTimer < this.TRIP_STAND_DELAY) {
-        return;
-      }
-
-      this.isTripped = false;
-      this.tripStandTimer = 0;
     }
 
     // Movement is relative to camera facing (this.targetRotY)
@@ -780,6 +790,25 @@ export class Player {
     return null;
   }
 
+  // Check if player is currently over any surface pit, lake, shaft, or quicksand
+  isOverPit(world, z = this.z) {
+    if (!world) return false;
+    // Ladder shafts and straight drop shafts
+    if (world.activeHazards) {
+      for (const h of world.activeHazards) {
+        if (h.type === 'ladder_shaft' && z <= h.maxZ && z >= h.minZ) return true;
+        if (['quicksand', 'tarpit', 'water', 'log_exit_pit'].includes(h.type) && z <= h.maxZ && z >= h.minZ) return true;
+      }
+    }
+    // Opening / disappearing quicksand pits
+    if (world.activeOpeningPits) {
+      for (const pitData of world.activeOpeningPits) {
+        if (Math.abs(z - pitData.z) < pitData.radius) return true;
+      }
+    }
+    return false;
+  }
+
   // Determine surface elevation (ground or stepped hazard)
   getSurfaceElevation(world, z) {
     // In the tunnel, the dirt ground runs underneath everything on the surface
@@ -1051,20 +1080,19 @@ export class Player {
         const distZ = Math.abs(this.z - hazard.z);
         // Surface log doesn't hit the player 8m below in the tunnel
         if (Math.abs(this.y - 0.45) > 3) continue;
+        // When over a pit (vine swing, jumping across lakes/crocs/quicksand/shafts), log hitbox is disabled
+        if (this.isOverPit(world)) continue;
         // If close and not jumping high enough
         if (distZ < 1.0 && this.y < 0.75) {
           if (this.tripCooldown <= 0) {
-            this.tripCooldown = 0.6;
+            this.tripCooldown = 1.0;
             this.isTripped = true;
+            this.trippingHazard = hazard;
             this.tripStandTimer = 0;
-            // Push Harry slightly past the log to avoid an immediate re-collision when he gets up.
-            this.z = hazard.z - 1.5;
             this.score = Math.max(0, this.score - 100);
             audio.playTrip();
-            // Stop walking and require a fresh direction input to stand up.
+            // Stop forward/backward speed while kneeling
             this.vz = 0;
-            this.moveForward = false;
-            this.moveBackward = false;
           }
         }
       } else if (hazard.type === 'fire') {
@@ -1125,23 +1153,21 @@ export class Player {
     // Off the vine: hide the grip bar (only shown while swinging).
     if (this.arms && this.arms.gripBar) this.arms.gripBar.visible = false;
 
-    // Face-plant: player trips and hands splay flat on the ground
+    // Kneeling: player drops to knees as in the original Atari 2600 while log rolls by
     if (isTripped) {
-      // Keep the camera higher so the arms don't clip through the floor
-      const targetY = this.y + 1.2; 
-      this.camera.position.set(0, THREE.MathUtils.lerp(this.camera.position.y, targetY, delta * 8), this.z);
-      // Camera looks down at the ground
-      this.camera.rotation.x = THREE.MathUtils.lerp(this.camera.rotation.x, -0.8, delta * 6);
+      // Lower camera to kneeling height (~1.2m above feet)
+      const targetY = this.y + 1.2;
+      this.camera.position.set(0, THREE.MathUtils.lerp(this.camera.position.y, targetY, delta * 10), this.z);
+      // Slight natural tilt down, maintaining player facing direction (targetRotY)
+      this.camera.rotation.x = THREE.MathUtils.lerp(this.camera.rotation.x, -0.15, delta * 10);
       this.camera.rotation.z = 0;
-      this.camera.rotation.y = 0;
+      this.camera.rotation.y = THREE.MathUtils.lerp(this.camera.rotation.y, this.targetRotY, delta * 15);
       if (this.arms) {
-        // Arms stretched firmly forward to brace the fall
-        // Raised position (-0.1) to simulate hands touching the ground
-        this.arms.leftArm.position.set(-0.32, -0.1, -0.7);
-        this.arms.rightArm.position.set(0.32, -0.1, -0.7);
-        // Straight rotation to support the hands
-        this.arms.leftArm.rotation.x = Math.PI / 2.5;
-        this.arms.rightArm.rotation.x = Math.PI / 2.5;
+        // Arms rested on knees / bracing slightly
+        this.arms.leftArm.position.set(-0.3, -0.25, -0.5);
+        this.arms.rightArm.position.set(0.3, -0.25, -0.5);
+        this.arms.leftArm.rotation.x = Math.PI / 4;
+        this.arms.rightArm.rotation.x = Math.PI / 4;
       }
       return;
     }
@@ -1419,6 +1445,13 @@ export class Player {
     if (finalScore) finalScore.textContent = String(this.score).padStart(6, '0');
     if (finalScreens) finalScreens.textContent = Math.floor(Math.abs(this.z) / 60) + 1;
     if (finalTreasures) finalTreasures.textContent = `${this.treasuresCollected}`;
+
+    // Focus first button on the game over screen for keyboard/gamepad navigation
+    const restartBtn = document.getElementById('restart-btn');
+    if (restartBtn) {
+      restartBtn.focus();
+      restartBtn.classList.add('menu-focus');
+    }
   }
 
   reset() {
