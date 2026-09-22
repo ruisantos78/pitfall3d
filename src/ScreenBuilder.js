@@ -145,6 +145,10 @@ export class ScreenBuilder {
     const obj = spec.objectType;
     const scene = spec.sceneType;
     const objZ = startZ - SCREEN_LENGTH * (124 / 160);
+    // Fire/snake/treasure sit a bit further right (deeper) than logs to keep
+    // clearance from the first/last ladder shaft on HOLE_TRIPLE screens
+    // (phase 251 was 4.5m from the last hole — now ~8m).
+    const objZGround = startZ - SCREEN_LENGTH * (134 / 160);
     const treasureKinds = ['money', 'silver', 'gold', 'diamond'];
 
     const addOverlayObject = (z) => {
@@ -156,14 +160,14 @@ export class ScreenBuilder {
         }
         this.world.addLogExitPit(group, index, startZ);
       } else if (obj === 4) {
-        this.world.addStationaryLog(group, index, z);
+        this.world.addStationaryLog(group, index, objZGround);
       } else if (obj === 5) {
-        this.world.addStationaryLog(group, index, z + 5);
-        this.world.addStationaryLog(group, index, z - 5);
+        this.world.addStationaryLog(group, index, objZGround + 5);
+        this.world.addStationaryLog(group, index, objZGround - 5);
       } else if (obj === 6) {
-        this.world.addCampfire(group, index, z);
+        this.world.addCampfire(group, index, objZGround);
       } else if (obj === 7) {
-        this.world.addSnake(group, index, z);
+        this.world.addSnake(group, index, objZGround);
       }
     };
 
@@ -182,7 +186,7 @@ export class ScreenBuilder {
         const slotKey = this.world.treasureKey(index);
         if (!this.world.collectedTreasureSlots.has(slotKey)) {
           this.world.addOpeningQuicksandPit(group, index, midZ);
-          this.world.addTreasure(group, index, objZ, treasureKinds[obj & 3], slotKey);
+          this.world.addTreasure(group, index, objZGround, treasureKinds[obj & 3], slotKey);
         } else {
           this.world.addOpeningQuicksandPit(group, index, midZ);
         }

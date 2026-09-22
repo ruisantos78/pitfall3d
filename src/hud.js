@@ -1,7 +1,8 @@
 // Atari 2600 Pitfall HUD & UI Management
 import { audio } from './audio.js';
 import { t } from './i18n.js';
-import { getShowHelp, getHighScore } from './settings.js';
+import { getShowHelp, getHighScore, getShowMinimap, setShowMinimap } from './settings.js';
+import { Minimap } from './minimap.js';
 
 export class HUD {
   constructor() {
@@ -17,12 +18,15 @@ export class HUD {
     this.btnSound = document.getElementById('btn-sound');
     this.btnCrt = document.getElementById('btn-crt');
     this.btnFullscreen = document.getElementById('btn-fullscreen');
+    this.btnMinimap = document.getElementById('btn-minimap');
 
     this.rearLogPromptEl = document.getElementById('rear-log-prompt');
     this.rearLogBarEl = document.getElementById('rear-log-bar');
 
     this.crtEnabled = true;
     this.lastJumpCue = 0;
+    this.minimap = new Minimap();
+    this.minimap.setVisible(getShowMinimap());
     // Cached DOM values: HUD.update runs every frame, but DOM writes trigger
     // style/layout work, so each field is only touched when its value changes.
     this._lastScore = -1;
@@ -73,6 +77,14 @@ export class HUD {
         this.refreshOptionsLabels();
       });
     }
+
+    if (this.btnMinimap) {
+      this.btnMinimap.addEventListener('click', () => {
+        setShowMinimap(!getShowMinimap());
+        this.minimap.setVisible(getShowMinimap());
+        this.refreshOptionsLabels();
+      });
+    }
   }
 
   isFullscreen() {
@@ -101,6 +113,8 @@ export class HUD {
     this.setToggleLabel(this.btnSound, audio.enabled ? '🔊' : '🔇', t(audio.enabled ? 'opt.soundOn' : 'opt.soundOff'));
     this.setToggleLabel(this.btnCrt, '📺', t(this.crtEnabled ? 'opt.crtOn' : 'opt.crtOff'));
     this.setToggleLabel(this.btnFullscreen, '⛶', t(this.isFullscreen() ? 'opt.fullscreenOn' : 'opt.fullscreenOff'));
+    this.setToggleLabel(this.btnMinimap, '🗺️', t(getShowMinimap() ? 'opt.minimapOn' : 'opt.minimapOff'));
+    if (this.btnMinimap) this.btnMinimap.title = t('opt.minimapTitle');
     if (player && typeof player.refreshTouchLabel === 'function') {
       player.refreshTouchLabel();
     }
@@ -174,10 +188,13 @@ export class HUD {
     }
 
     // Rear-log aid: Expanding striped bar (zebra pattern).
-    // Completely independent visual element.
+    // Completely independent visual element. Stays active even with the
+    // sonar minimap on (CSS moves it just below the radar, see body.minimap-on).
+    // Only the current screen's logs feed it (see systems/logs.js).
     const threat = world ? world.nearestLogThreat : null;
+    const threatSameScreen = threat && threat.screenIndex === currentScreenIndex;
     if (
-      threat && !player.inTunnel && !player.climbing && !player.attachedVine &&
+      threatSameScreen && !player.inTunnel && !player.climbing && !player.attachedVine &&
       player.targetRotY !== 0 &&
       threat.logZ < player.z && threat.t <= 3.6
     ) {
@@ -197,6 +214,16 @@ export class HUD {
     } else {
       if (this.rearLogPromptEl) {
         this.rearLogPromptEl.style.display = 'none';
+      }
+    }
+
+    // Sonar minimap (current screen, surface only).
+    if (this.minimap) {
+      const underground = player.inTunnel || player.climbing;
+      const radarOn = getShowMinimap();
+      this.minimap.setVisible(radarOn && !underground);
+      if (radarOn && !underground) {
+        this.minimap.draw(player, currentScreenIndex, world);
       }
     }
   }

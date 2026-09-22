@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { audio } from '../audio.js';
+import { SCREEN_LENGTH } from '../WorldConstants.js';
 
 // Kept in sync with World.ROLLING_CYCLE (local copy avoids a world<->system
 // circular import; both must stay 7.4).
@@ -13,6 +14,7 @@ export const LOG_FX_RANGE = 40;
 
 export function updateRollingLogs(world, delta, playerZ, playerVz) {
   world.nearestLogThreat = null;
+  const currentScreen = Math.floor(-playerZ / SCREEN_LENGTH);
   const logs = world.activeRollingLogs;
   for (let i = 0; i < logs.length; i++) {
     const l = logs[i];
@@ -85,6 +87,8 @@ export function updateRollingLogs(world, delta, playerZ, playerVz) {
       l.z += l.speed * delta;
       l.mesh.position.z = l.z;
 
+      // Log proximity audio + 1D interception threat (feeds the HUD rear
+      // warning and jump cue; position integration above always runs).
       if (near) {
         const ldz = Math.abs(l.z - playerZ);
         if (ldz < 25) {
@@ -96,11 +100,14 @@ export function updateRollingLogs(world, delta, playerZ, playerVz) {
         }
       }
 
-      const relV = playerVz - l.speed;
-      let tHit = Infinity;
-      if (Math.abs(relV) > 0.5) tHit = (l.z - playerZ) / relV;
-      if (tHit >= 0 && tHit < 4 && (world.nearestLogThreat === null || tHit < world.nearestLogThreat.t)) {
-        world.nearestLogThreat = { t: tHit, logZ: l.z };
+      // Only the current screen's logs feed the rear alert (no cross-screen bleed)
+      if (l.screenIndex === currentScreen) {
+        const relV = playerVz - l.speed;
+        let tHit = Infinity;
+        if (Math.abs(relV) > 0.5) tHit = (l.z - playerZ) / relV;
+        if (tHit >= 0 && tHit < 4 && (world.nearestLogThreat === null || tHit < world.nearestLogThreat.t)) {
+          world.nearestLogThreat = { t: tHit, logZ: l.z, screenIndex: l.screenIndex };
+        }
       }
 
       if (l.z >= l.exitPitZ) {

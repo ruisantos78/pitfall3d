@@ -6,6 +6,7 @@ export class SettingsManager {
     this.storageKey = storageKey;
     this.lang = 'pt';
     this.showHelp = false;
+    this.showMinimap = false;
     this.highScore = 0;
     this.listeners = new Set();
     this.load();
@@ -18,6 +19,7 @@ export class SettingsManager {
         const saved = JSON.parse(raw);
         if (saved.lang === 'pt' || saved.lang === 'en') this.lang = saved.lang;
         if (typeof saved.showHelp === 'boolean') this.showHelp = saved.showHelp;
+        if (typeof saved.showMinimap === 'boolean') this.showMinimap = saved.showMinimap;
         if (Number.isFinite(saved.highScore) && saved.highScore > 0) {
           this.highScore = Math.floor(saved.highScore);
         }
@@ -32,6 +34,7 @@ export class SettingsManager {
       localStorage.setItem(this.storageKey, JSON.stringify({
         lang: this.lang,
         showHelp: this.showHelp,
+        showMinimap: this.showMinimap,
         highScore: this.highScore,
       }));
     } catch {
@@ -58,6 +61,16 @@ export class SettingsManager {
     this.showHelp = !!next;
     this.persist();
     this.notify('showHelp', this.showHelp);
+  }
+
+  getShowMinimap() {
+    return this.showMinimap;
+  }
+
+  setShowMinimap(next) {
+    this.showMinimap = !!next;
+    this.persist();
+    this.notify('showMinimap', this.showMinimap);
   }
 
   getHighScore() {
@@ -98,5 +111,7 @@ export const getLanguage = () => settings.getLanguage();
 export const setLanguage = (next) => settings.setLanguage(next);
 export const getShowHelp = () => settings.getShowHelp();
 export const setShowHelp = (next) => settings.setShowHelp(next);
+export const getShowMinimap = () => settings.getShowMinimap();
+export const setShowMinimap = (next) => settings.setShowMinimap(next);
 export const getHighScore = () => settings.getHighScore();
 export const submitScore = (score) => settings.submitScore(score);
