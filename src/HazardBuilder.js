@@ -215,7 +215,7 @@ export class HazardBuilder {
     group.add(tarMesh);
     this.addShallowPitBottom(group, centerZ, length);
     this.world.activeHazards.push({
-      type: 'tar',
+      type: 'tarpit',
       screenIndex,
       minZ: centerZ - length / 2,
       maxZ: centerZ + length / 2,

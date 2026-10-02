@@ -801,20 +801,24 @@ export class Player {
     return null;
   }
 
-  // Check if player is currently over any surface pit, lake, shaft, or quicksand
+  // Check if a given Z is over any surface pit, lake, shaft, or quicksand.
+  // Defaults to the player's position, but log collision passes the LOG's
+  // position so only the log physically over a hole is forgiven
+  // (the pit hit-kill under the player always stays armed).
   isOverPit(world, z = this.z) {
     if (!world) return false;
     // Ladder shafts and straight drop shafts
     if (world.activeHazards) {
       for (const h of world.activeHazards) {
         if (h.type === 'ladder_shaft' && z <= h.maxZ && z >= h.minZ) return true;
-        if (['quicksand', 'tarpit', 'water', 'log_exit_pit'].includes(h.type) && z <= h.maxZ && z >= h.minZ) return true;
+        if (['quicksand', 'tar', 'tarpit', 'water', 'log_exit_pit'].includes(h.type) && z <= h.maxZ && z >= h.minZ) return true;
       }
     }
-    // Opening / disappearing quicksand pits
+    // Opening / disappearing quicksand pits (only open sections count as holes;
+    // a closed lid is solid ground where logs must still trip).
     if (world.activeOpeningPits) {
       for (const pitData of world.activeOpeningPits) {
-        if (Math.abs(z - pitData.z) < pitData.radius) return true;
+        if (Math.abs(z - pitData.z) < pitData.radius && world.isQuicksandOpenAt(pitData, z)) return true;
       }
     }
     return false;
@@ -835,7 +839,7 @@ export class Player {
       // Death reason depends on where it fell: lake/tar/quicksand = abyss
       this.ceilDeathKey = 'death.cave';
       for (const h of world.activeHazards) {
-        if ((h.type === 'tarpit' || h.type === 'water' || h.type === 'quicksand') && z <= h.maxZ && z >= h.minZ) {
+        if ((h.type === 'tar' || h.type === 'tarpit' || h.type === 'water' || h.type === 'quicksand') && z <= h.maxZ && z >= h.minZ) {
           this.ceilDeathKey = 'death.abyss';
           break;
         }
@@ -859,7 +863,7 @@ export class Player {
     }
     // Check if player is over a pit/pond hazard
     for (const hazard of world.activeHazards) {
-      if (['quicksand', 'tarpit', 'water'].includes(hazard.type)) {
+      if (['quicksand', 'tar', 'tarpit', 'water'].includes(hazard.type)) {
         if (z <= hazard.maxZ && z >= hazard.minZ) {
           // If it's water, check crocodile stepping zones!
           if (hazard.type === 'water') {
@@ -889,7 +893,7 @@ export class Player {
           
           // Water and tar have a shallow physical bottom, independent from the
           // underground tunnel. Reaching that bottom is still hit-kill.
-          if (hazard.type === 'tarpit' || hazard.type === 'water') {
+          if (hazard.type === 'tar' || hazard.type === 'tarpit' || hazard.type === 'water') {
             if (!DEBUG_GOD_MODE && this.y <= PIT_FLOOR_Y) {
               audio.playSink();
               this.die('death.abyss');

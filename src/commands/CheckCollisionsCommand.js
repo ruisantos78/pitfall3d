@@ -13,13 +13,6 @@ export class CheckCollisionsCommand extends Command {
     const p = this.player;
     const world = this.world;
 
-    // Hoisted pit check: isOverPit scans every hazard, so calling it inside
-    // the loop below made collision detection O(n^2) per frame.
-    const needsPitCheck = !DEBUG_GOD_MODE && Math.abs(p.y - 0.45) <= 3 &&
-      world.activeHazards.some((h) =>
-        h.type === 'log' || h.type === 'rolling_log');
-    const overPit = needsPitCheck ? p.isOverPit(world) : false;
-
     // 1. Logs (Stationary & Rolling)
     for (const hazard of world.activeHazards) {
       if (hazard.type === 'log' || hazard.type === 'rolling_log') {
@@ -27,7 +20,10 @@ export class CheckCollisionsCommand extends Command {
         if (hazard.falling || hazard.fallingIntoPit || hazard.waiting) continue;
         const distZ = Math.abs(p.z - hazard.z);
         if (Math.abs(p.y - 0.45) > 3) continue;
-        if (overPit) continue;
+        // The LOG's own position decides: a log rolling over an open pit
+        // must not trip the player (avoids accidental touches mid-jump),
+        // but the pit hit-kill under the player's feet always stays armed.
+        if (p.isOverPit(world, hazard.z)) continue;
         if (distZ < 1.0 && p.y < 0.75) {
           if (p.tripCooldown <= 0) {
             p.tripCooldown = 1.0;
