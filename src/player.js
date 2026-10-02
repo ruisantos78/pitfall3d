@@ -95,8 +95,11 @@ export class Player {
     this.isDying = false;
     this.deathTimer = 0;
     this.deathReasonKey = 'death.lifeLost';
+    this.diedInTunnel = false;
+    this.ceilDeathKey = 'death.cave';
     this.tripCooldown = 0;
     this.isTripped = false; // Face-planted on the ground, waiting for a new direction
+    this.trippingHazard = null;
     // Checkpoint: last screen boundary strip crossed (respawn returns to it).
     this.checkpointZ = null;
     // Underground: in the tunnel and/or climbing up/down the ladder.

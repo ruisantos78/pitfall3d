@@ -45,6 +45,7 @@ export class ResetCommand extends Command {
     if (p.arms && p.arms.gripBar) p.arms.gripBar.visible = false;
     p.tripCooldown = 0;
     p.isTripped = false;
+    p.trippingHazard = null;
     p.tripStandTimer = 0;
     p.respawnDrop = false;
     p.inTunnel = false;

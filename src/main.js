@@ -138,8 +138,23 @@ class Game {
 
     const startGame = () => {
       if (this.isRunning) return;
+      // Same keypress/gamepad press that led here (e.g. confirming MENU on
+      // the game-over screen and landing focus on INICIAR) must never start
+      // the game instantly: require the menu to have been visible briefly.
+      if (this.menuShownAt && performance.now() - this.menuShownAt < 350) return;
       audio.init();
       audio.startAmbient();
+      // Drop stale held inputs (arrow/space presses used to navigate the
+      // menu must not leak into gameplay as movement/jump).
+      if (this.player) {
+        this.player.moveForward = false;
+        this.player.moveBackward = false;
+        this.player.actionPressed = false;
+        this.player.actionJustPressed = false;
+        this.player.turnJustPressed = false;
+        this.player.padForward = false;
+        this.player.padBackward = false;
+      }
       if (startOverlay) startOverlay.classList.add('hidden');
       this.isRunning = true;
       this.lastTime = performance.now();
@@ -205,7 +220,8 @@ class Game {
     this.refreshOptionsUI();
 
     if (restartBtn) {
-      restartBtn.addEventListener('click', () => {
+      restartBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
         this.restartGame();
       });
     }
@@ -276,22 +292,34 @@ class Game {
     }
   }
   restartGame() {
-    // Reset player
+    // Full new-game reset: pristine player + pristine world (no timers,
+    // treasures, tunnel state, or hazard clocks leak from the last run).
     this.player.reset();
-
     this.rebuildWorld();
+
+    const gameoverOverlay = document.getElementById('gameover-overlay');
+    if (gameoverOverlay) gameoverOverlay.classList.add('hidden');
 
     this.isRunning = true;
     this.lastTime = performance.now();
   }
 
+  // Rebuilds all world screens and entities for a fresh run.
+  rebuildWorld() {
+    if (this.world) this.world.fullReset();
+  }
+
   // Return to the main menu (after game over)
   backToMenu() {
-    this.player.reset();
-    this.rebuildWorld();
-
+    // Stop the game FIRST so a failure below can never leave gameplay running.
     this.isRunning = false;
     this.lastTime = performance.now();
+
+    const gameoverOverlay = document.getElementById('gameover-overlay');
+    if (gameoverOverlay) gameoverOverlay.classList.add('hidden');
+
+    this.player.reset();
+    this.rebuildWorld();
 
     // Always reopens on the main menu view
     const menuMain = document.getElementById('menu-main');
@@ -302,8 +330,15 @@ class Game {
     const startOverlay = document.getElementById('start-overlay');
     if (startOverlay) startOverlay.classList.remove('hidden');
 
+    // Mark when the menu became visible (guards startGame against the very
+    // keypress/click that triggered this return).
+    this.menuShownAt = performance.now();
+
     this.refreshOptionsUI();
-    this.updateMenuFocus();
+    // Defer focus: the native Space-keyup / Enter activation of the keypress
+    // that confirmed MENU would otherwise fire on the newly focused INICIAR
+    // button and start the game instantly.
+    requestAnimationFrame(() => this.updateMenuFocus());
   }
 
   // Get currently visible and interactive menu buttons

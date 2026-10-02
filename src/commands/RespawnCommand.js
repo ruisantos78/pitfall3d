@@ -12,7 +12,7 @@ export class RespawnCommand extends Command {
 
   isRespawnGroundSafe(world, z) {
     for (const hazard of world.activeHazards) {
-      if (['quicksand', 'tarpit', 'water', 'ladder_shaft'].includes(hazard.type)) {
+      if (['quicksand', 'tar', 'tarpit', 'water', 'ladder_shaft'].includes(hazard.type)) {
         if (z <= hazard.maxZ && z >= hazard.minZ) return false;
       } else if (hazard.type === 'log_exit_pit') {
         if (z >= hazard.minZ - 1 && z <= hazard.maxZ + 1) return false;
@@ -89,6 +89,7 @@ export class RespawnCommand extends Command {
     p.vz = 0;
     p.isGrounded = false;
     p.isTripped = false;
+    p.trippingHazard = null;
     p.tripStandTimer = 0;
     p.tripCooldown = 0;
 

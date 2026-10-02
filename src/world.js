@@ -324,6 +324,64 @@ export class World {
     this.collectedTreasureSlots.clear();
   }
 
+  // Full new-game reset: drops every per-run entity so a fresh run never
+  // inherits timers, collected treasures, debris, tunnel state, or lights
+  // from the previous game. Shared GPU caches and materials are kept.
+  fullReset() {
+    // Dismantle the underground shortcut first (removes its walls,
+    // scorpions, emitters, and restores ladder plugs/visibility).
+    this.tunnelManager.deactivateTunnelCorridor();
+    this.tunnelManager.tunnelCorridor = null;
+    this.tunnelManager.tunnelCorridorWalls = [];
+    this.tunnelManager.tunnelCorridorScorpions = [];
+    this.tunnelManager.openShaftScreens = null;
+    this.tunnelManager.openPlugs = [];
+    this.tunnelManager.visibleLadderScreens = new Set();
+
+    // Remove every built screen from the scene and dispose its meshes.
+    for (const screen of this.screens.values()) {
+      this.scene.remove(screen.group);
+      this.disposeScreenGroup(screen.group);
+    }
+    this.screens.clear();
+    if (this._screenQueue) this._screenQueue.length = 0;
+    if (this._queuedScreens) this._queuedScreens.clear();
+
+    // Drop all per-run entities.
+    this.activeVines = [];
+    this.activeCrocodiles = [];
+    this.activeRollingLogs = [];
+    this.nearestLogThreat = null;
+    this.activeTreasures = [];
+    this.activeHazards = [];
+    this.animatedCampfires = [];
+    this.animatedTorches = [];
+    this.animatedSnakes = [];
+    this.torchTime = 0;
+    this.activeOpeningPits = [];
+    this.activeTunnelWalls = [];
+    this.collectedTreasureSlots.clear();
+
+    // Clear debris meshes and light emitters (rebuilt with the screens).
+    for (const d of this.debrisManager.logDebris) {
+      d.mesh.removeFromParent();
+    }
+    this.debrisManager.logDebris = [];
+    this.lightPoolManager.lightEmitters = [];
+    for (const slot of this.lightPoolManager.lightPool) {
+      slot.intensity = 0;
+      slot.userData.emitter = null;
+    }
+    this.lightPoolManager._reassignTimer = 0;
+    this.lightPoolManager._lastAssignZ = Infinity;
+    this.lightPoolManager._lastAssignUnder = null;
+
+    // Rebuild the starting area so the menu backdrop and the new run
+    // start from pristine screens with fresh hazard clocks.
+    this.getOrCreateScreen(0);
+    this.prefetchScreensIdle([1, 2]);
+  }
+
   // TunnelManager delegation
   getWallZ(screenIndex, wall) {
     return this.tunnelManager.getWallZ(screenIndex, wall);
